@@ -10,6 +10,54 @@ from pathlib import Path
 from datetime import datetime
 
 
+VELOCITY_QF_THRESHOLDS = {
+    'good': 0.05,
+    'warn': 0.10,
+    'speed_questionable': 2.0,
+    'speed_bad': 3.0,
+}
+
+
+def compute_velocity_qf(result, threshold_good=None, threshold_warn=None):
+    """Assegna quality flag alle velocita' LADCP.
+
+    Criteri basati sull'errore dell'inversione (uerr):
+        QF=1: uerr <= threshold_good  (0.05 m/s default)
+        QF=2: threshold_good < uerr <= threshold_warn
+        QF=3: uerr > threshold_warn  (0.10 m/s default)
+        QF=9: NaN
+
+    Criteri aggiuntivi:
+        QF=3: velocita' |U| o |V| > 2.0 m/s (anomalie in Mediterraneo)
+        QF=4: velocita' > 3.0 m/s (certamente errate)
+
+    Returns:
+        dict con 'u_qf' e 'v_qf' arrays di int
+    """
+    if threshold_good is None:
+        threshold_good = VELOCITY_QF_THRESHOLDS['good']
+    if threshold_warn is None:
+        threshold_warn = VELOCITY_QF_THRESHOLDS['warn']
+
+    uerr = result.get('uerr', np.array([]))
+    u = result.get('u', np.array([]))
+    v = result.get('v', np.array([]))
+
+    qf = np.ones(len(u), dtype=int)
+    qf[np.isnan(u) | np.isnan(v)] = 9
+
+    if len(uerr) == len(u):
+        qf[(uerr > threshold_good) & (uerr <= threshold_warn)] = 2
+        qf[uerr > threshold_warn] = 3
+
+    speed = np.sqrt(u**2 + v**2)
+    qf[speed > VELOCITY_QF_THRESHOLDS['speed_questionable']] = \
+        np.maximum(qf[speed > VELOCITY_QF_THRESHOLDS['speed_questionable']], 3)
+    qf[speed > VELOCITY_QF_THRESHOLDS['speed_bad']] = 4
+
+    return {'u_qf': qf, 'v_qf': qf.copy()}
+
+
 def write_odv_collection(casts_data, output_dir, cruise_id="TUNSIC26"):
     """Write all casts as an ODV profile collection.
     
@@ -87,19 +135,25 @@ def write_cast_odv(cast, output_dir, cruise_id="TUNSIC26"):
         f.write("// <Variable name=\"Pressure [dbar]\" unit=\"dbar\">\n")
         f.write("// <Variable name=\"Depth [m]\" unit=\"m\">\n")
         f.write("// <Variable name=\"Temperature [deg C]\" unit=\"degC\">\n")
+        f.write("// <Variable name=\"QF:Temperature\">\n")
         f.write("// <Variable name=\"Salinity [PSU]\" unit=\"PSU\">\n")
+        f.write("// <Variable name=\"QF:Salinity\">\n")
         f.write("// <Variable name=\"SigmaTheta [kg/m3]\" unit=\"kg/m3\">\n")
+        f.write("// <Variable name=\"QF:SigmaTheta\">\n")
         f.write("// <Variable name=\"SoundSpeed [m/s]\" unit=\"m/s\">\n")
         f.write("// <Variable name=\"U [m/s]\" unit=\"m/s\">\n")
+        f.write("// <Variable name=\"QF:U\">\n")
         f.write("// <Variable name=\"V [m/s]\" unit=\"m/s\">\n")
+        f.write("// <Variable name=\"QF:V\">\n")
         f.write("// <Variable name=\"U_Error [m/s]\" unit=\"m/s\">\n")
         f.write("// <Variable name=\"PotTemp [deg C]\" unit=\"degC\">\n")
         f.write("//\n")
-        
+
         # Column headers
         f.write("Pressure [dbar]\tDepth [m]\tTemperature [deg C]\t"
-                "Salinity [PSU]\tSigmaTheta [kg/m3]\tSoundSpeed [m/s]\t"
-                "U [m/s]\tV [m/s]\tU_Error [m/s]\tPotTemp [deg C]\n")
+                "QF:Temperature\tSalinity [PSU]\tQF:Salinity\t"
+                "SigmaTheta [kg/m3]\tQF:SigmaTheta\tSoundSpeed [m/s]\t"
+                "U [m/s]\tQF:U\tV [m/s]\tQF:V\tU_Error [m/s]\tPotTemp [deg C]\n")
         
         # Build combined depth grid
         ctd_depth = ctd.get('depth', np.array([]))
@@ -140,12 +194,27 @@ def write_cast_odv(cast, output_dir, cruise_id="TUNSIC26"):
         ss = ctd.get('sound_speed', np.full(len(depth), np.nan)) if has_ctd else np.full(len(depth), np.nan)
         pot = ctd.get('pot_temp', np.full(len(depth), np.nan)) if has_ctd else np.full(len(depth), np.nan)
         P = ctd.get('pressure', np.full(len(depth), np.nan)) if has_ctd else np.full(len(depth), np.nan)
-        
+
+        # Compute quality flags
+        from ladcp_tool.processors.ctd_processor import compute_ctd_qf
+        ctd_qf = compute_ctd_qf(ctd) if has_ctd else {}
+        qf_t = ctd_qf.get('temperature_qf', np.ones(len(depth), dtype=int))
+        qf_s = ctd_qf.get('salinity_qf', np.ones(len(depth), dtype=int))
+        qf_sig = ctd_qf.get('sigma0_qf', np.ones(len(depth), dtype=int))
+
+        vel_for_qf = {'u': ladcp_u_interp, 'v': ladcp_v_interp,
+                       'uerr': ladcp_err_interp}
+        vel_qf = compute_velocity_qf(vel_for_qf)
+        qf_u = vel_qf['u_qf']
+        qf_v = vel_qf['v_qf']
+
         # Write data rows
         for i in range(len(depth)):
-            f.write(f"{P[i]:.1f}\t{depth[i]:.1f}\t{T[i]:.4f}\t{S[i]:.4f}\t"
-                    f"{sig[i]:.4f}\t{ss[i]:.1f}\t"
-                    f"{ladcp_u_interp[i]:.4f}\t{ladcp_v_interp[i]:.4f}\t"
+            f.write(f"{P[i]:.1f}\t{depth[i]:.1f}\t{T[i]:.4f}\t{qf_t[i]:d}\t"
+                    f"{S[i]:.4f}\t{qf_s[i]:d}\t"
+                    f"{sig[i]:.4f}\t{qf_sig[i]:d}\t{ss[i]:.1f}\t"
+                    f"{ladcp_u_interp[i]:.4f}\t{qf_u[i]:d}\t"
+                    f"{ladcp_v_interp[i]:.4f}\t{qf_v[i]:d}\t"
                     f"{ladcp_err_interp[i]:.4f}\t{pot[i]:.4f}\n")
     
     print(f"  ODV file: {outfile}")

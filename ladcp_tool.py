@@ -155,6 +155,7 @@ Examples:
                 if ctd_raw:
                     derived = compute_derived(ctd_raw)
                     binned_ctd = bin_profile(ctd_raw, derived)
+                    result['binned_ctd'] = binned_ctd
                     
                     # Save LDEO-compatible CTD ASCII
                     save_ldeo_format(ctd_raw, derived, station, ctd_ascii_dir)
@@ -266,7 +267,7 @@ Examples:
                 'lon': r.get('lon', 0),
                 'datetime': r.get('datetime', datetime(2026, 6, 24)),
                 'bottom_depth': r.get('bottom_depth', r.get('depth_max', 0)),
-                'ctd_profile': r.get('ctd_profile', binned_ctd),
+                'ctd_profile': r.get('binned_ctd', {}),
                 'ladcp_profile': r.get('ladcp_profile', {}),
             })
         write_odv_collection(odv_casts, odv_dir, args.cruise_id)

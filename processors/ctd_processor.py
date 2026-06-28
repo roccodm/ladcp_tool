@@ -16,6 +16,13 @@ except ImportError:
     HAS_GSW = False
 
 
+MEDITERRANEAN_RANGES = {
+    'temperature': {'good': (-2.0, 35.0), 'warn': (-2.5, 40.0)},
+    'salinity':    {'good': (2.0, 42.0),  'warn': (0.0, 45.0)},
+    'sigma0':      {'good': (18.0, 30.0), 'warn': (15.0, 32.0)},
+}
+
+
 def read_cnv(filepath):
     """Read SBE .cnv file, return data array and metadata dict.
     
@@ -436,6 +443,49 @@ def bin_profile_depth(ctd_data, derived, bin_size_m=1.0):
         result[k] = result[k][valid]
 
     return result
+
+
+def compute_ctd_qf(binned, ranges=None):
+    """Assegna quality flag ODV/SeaDataNet ai dati CTD binnati.
+
+    Criteri:
+        QF=1 (good): valori nel range fisico atteso
+        QF=3 (questionable): valori ai limiti del range
+        QF=4 (bad): valori fuori range fisico
+        QF=9 (missing): NaN
+
+    Args:
+        binned: dict da bin_profile() o bin_profile_depth()
+        ranges: dict di range per variabili (default: MEDITERRANEAN_RANGES)
+
+    Returns:
+        dict con chiavi '{var}_qf', ciascuna un array di int
+    """
+    if ranges is None:
+        ranges = MEDITERRANEAN_RANGES
+
+    qf = {}
+    for var, lim in ranges.items():
+        vals = binned.get(var, np.array([]))
+        flags = np.ones(len(vals), dtype=int)
+        flags[np.isnan(vals)] = 9
+
+        if len(vals) == 0:
+            qf[f'{var}_qf'] = flags
+            continue
+
+        lo_warn = vals < lim['good'][0]
+        hi_warn = vals > lim['good'][1]
+        flags[lo_warn & (vals >= lim['warn'][0])] = 3
+        flags[hi_warn & (vals <= lim['warn'][1])] = 3
+
+        lo_bad = vals < lim['warn'][0]
+        hi_bad = vals > lim['warn'][1]
+        flags[lo_bad | hi_bad] = 4
+
+        qf[f'{var}_qf'] = flags
+
+    return qf
 
 
 def save_ldeo_format(ctd_data, derived, prefix, output_dir):
