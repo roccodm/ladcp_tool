@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ladcp_tool.processors.ctd_processor import (
     read_cnv, extract_ctd, compute_derived, bin_profile, save_ldeo_format,
+    isolate_downcast, check_pressure_monotonicity,
 )
 from ladcp_tool.outputs.odv_writer import write_odv_collection
 from ladcp_tool.outputs.plotter import plot_ctd_profile, plot_combined
@@ -53,6 +54,8 @@ Examples:
                         help='Skip ODV file generation')
     parser.add_argument('--no-ldeo', action='store_true',
                         help='Skip LDEO-compatible ASCII output')
+    parser.add_argument('--include-upcast', action='store_true',
+                        help='Include upcast data in profiles (default: downcast only)')
     
     args = parser.parse_args()
     
@@ -77,6 +80,7 @@ Examples:
     print(f"  Source: {source}")
     print(f"  Output: {output}")
     print(f"  Bin size: {args.bin_size} dbar")
+    print(f"  Mode: {'downcast + upcast' if args.include_upcast else 'downcast only'}")
     print(f"{'='*60}\n")
     
     cnv_files = sorted(source.glob("*.cnv"))
@@ -100,7 +104,20 @@ Examples:
             if ctd_raw is None:
                 print(f"  SKIP: missing P/T/C columns")
                 continue
-            
+
+            if not args.include_upcast:
+                n_before = len(ctd_raw['pressure'])
+                ctd_raw = isolate_downcast(ctd_raw)
+                pct = 100 * ctd_raw['n_scans_downcast'] / max(ctd_raw['n_scans_raw'], 1)
+                p_lo = float(np.nanmin(ctd_raw['pressure'])) if len(ctd_raw['pressure']) else 0.0
+                p_hi = float(np.nanmax(ctd_raw['pressure'])) if len(ctd_raw['pressure']) else 0.0
+                print(f"  Downcast: {ctd_raw['n_scans_downcast']}/{ctd_raw['n_scans_raw']}"
+                      f" scan ({pct:.0f}%)")
+                print(f"  Pressure range: {p_lo:.1f} – {p_hi:.1f} dbar")
+                if ctd_raw.get('monotonicity_violations', 0) > 0:
+                    print(f"  Monotonicity violations removed: "
+                          f"{ctd_raw['monotonicity_violations']} scans")
+
             derived = compute_derived(ctd_raw)
             binned = bin_profile(ctd_raw, derived, bin_size=args.bin_size)
             

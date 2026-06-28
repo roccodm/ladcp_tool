@@ -146,6 +146,135 @@ def extract_ctd(arr, meta):
     }
 
 
+def isolate_downcast(ctd_data):
+    """Estrae il solo downcast dal profilo CTD.
+
+    Identifica il punto di massima pressione (fondo della calata) e
+    trattiene solo i dati dalla superficie fino a quel punto. Applica
+    poi un filtro di monotonicita per rimuovere eventuali inversioni
+    residue di pressione (pause, rallentamenti non eliminati dal
+    Loop Edit).
+
+    Args:
+        ctd_data: dict da extract_ctd() con chiavi 'pressure',
+                  'temperature', 'conductivity', 'elapsed', ecc.
+
+    Returns:
+        ctd_data filtrato (stesso formato, meno scan).
+        Aggiunge le chiavi:
+            'n_scans_raw': numero scan originali
+            'n_scans_downcast': numero scan nel downcast
+            'p_max_index': indice dello scan di massima pressione
+            'upcast_excluded': True
+            'monotonicity_violations': numero scan rimossi per non-monotonicita
+    """
+    from scipy.ndimage import median_filter
+
+    P = ctd_data['pressure']
+    n_raw = len(P)
+
+    if n_raw == 0:
+        out = dict(ctd_data)
+        out['n_scans_raw'] = 0
+        out['n_scans_downcast'] = 0
+        out['p_max_index'] = -1
+        out['upcast_excluded'] = True
+        out['monotonicity_violations'] = 0
+        return out
+
+    P_filled = P.copy()
+    nan_mask = ~np.isfinite(P_filled)
+    if nan_mask.any():
+        idx = np.arange(n_raw)
+        good = ~nan_mask
+        if good.any():
+            P_filled[nan_mask] = np.interp(idx[nan_mask], idx[good], P_filled[good])
+        else:
+            P_filled[nan_mask] = 0.0
+
+    size = 5 if n_raw >= 5 else n_raw
+    P_smooth = median_filter(P_filled, size=size)
+    i_max = int(np.argmax(P_smooth))
+
+    down_mask = np.zeros(n_raw, dtype=bool)
+    down_mask[:i_max + 1] = True
+
+    P_down = P_filled[down_mask]
+    mono_mask = np.ones(len(P_down), dtype=bool)
+    p_prev = P_down[0] if len(P_down) > 0 else 0.0
+    n_mono_viol = 0
+    for j in range(1, len(P_down)):
+        if P_down[j] < p_prev:
+            mono_mask[j] = False
+            n_mono_viol += 1
+        else:
+            p_prev = P_down[j]
+
+    down_indices = np.where(down_mask)[0]
+    final_indices = down_indices[mono_mask]
+
+    result = {}
+    for key, val in ctd_data.items():
+        if isinstance(val, np.ndarray) and len(val) == n_raw:
+            result[key] = val[final_indices]
+        else:
+            result[key] = val
+
+    result['n_scans_raw'] = n_raw
+    result['n_scans_downcast'] = int(len(final_indices))
+    result['p_max_index'] = i_max
+    result['upcast_excluded'] = True
+    result['monotonicity_violations'] = n_mono_viol
+
+    return result
+
+
+def check_pressure_monotonicity(ctd_data, fix=True):
+    """Verifica e opzionalmente corregge la monotonicita della pressione.
+
+    Usato standalone quando si mantiene l'upcast (A1 disattivo):
+    rimuove gli scan con inversione di pressione rispetto al scan
+    precedente. Nel downcast-only la stessa logica e integrata in
+    isolate_downcast().
+
+    Args:
+        ctd_data: dict da extract_ctd()
+        fix: se True, rimuove gli scan con inversione di pressione
+
+    Returns:
+        ctd_data filtrato, con chiave aggiuntiva:
+            'monotonicity_violations': numero di scan rimossi
+    """
+    P = ctd_data['pressure']
+    if len(P) == 0:
+        ctd_data['monotonicity_violations'] = 0
+        return ctd_data
+
+    dP = np.diff(P)
+    violations = np.where(dP < 0)[0] + 1
+
+    if len(violations) == 0:
+        ctd_data['monotonicity_violations'] = 0
+        return ctd_data
+
+    print(f"  WARNING: {len(violations)} pressure inversions detected")
+
+    if fix:
+        keep = np.ones(len(P), dtype=bool)
+        keep[violations] = False
+        result = {}
+        for key, val in ctd_data.items():
+            if isinstance(val, np.ndarray) and len(val) == len(P):
+                result[key] = val[keep]
+            else:
+                result[key] = val
+        result['monotonicity_violations'] = int(len(violations))
+        return result
+
+    ctd_data['monotonicity_violations'] = int(len(violations))
+    return ctd_data
+
+
 def compute_derived(ctd_data):
     """Compute derived CTD variables using GSW.
     
@@ -215,7 +344,7 @@ def bin_profile(ctd_data, derived, bin_size=1.0):
     
     for i in range(len(edges) - 1):
         mask = (P >= edges[i]) & (P < edges[i+1]) & good
-        if mask.sum() > 3:
+        if mask.sum() >= 1:
             result['temperature'][i] = np.nanmean(ctd_data['temperature'][mask])
             result['salinity'][i] = np.nanmean(derived['salinity'][mask])
             result['sigma0'][i] = np.nanmean(derived.get('sigma0', [np.nan]*len(P))[mask])
