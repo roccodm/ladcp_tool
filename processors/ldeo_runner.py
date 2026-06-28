@@ -349,25 +349,162 @@ def run_octave_with_retry(cast, work_dir, timeout=600, max_memory_mb=0,
 
 
 def read_ldeo_result(result_file):
-    """Read LDEO result profile, return (depth, u, v, uerr) arrays."""
+    """Parse LDEO structured ASCII output.
+
+    Il file e' organizzato in sezioni delimitate da marcatori [NOME].
+    Ogni sezione contiene commenti (righe con #) e dati tabulari.
+    Retrocompatibile: espone depth/u/v/uerr/speed al primo livello
+    quando la sezione [VELOCITY] e' presente.
+
+    Returns:
+        dict con le sezioni:
+            'header': dict di metadati (chiave: valore)
+            'velocity': dict con arrays depth, u, v, uerr[, w, speed] (o None)
+            'shear': dict con arrays depth, u_shear, v_shear (o None)
+            'updown': dict con arrays depth, u_do, v_do, u_up, v_up (o None)
+            'ctd': dict con arrays depth, pressure, temperature, salinity[, ss, n2] (o None)
+            'range': dict con arrays depth, range[, range_do, range_up] (o None)
+            'diagnostics': dict di metriche (chiave: valore)
+            'bottom_track': dict (o None)
+            'warnings': list di stringhe warning
+    """
+    result = {
+        'header': {}, 'velocity': None, 'shear': None,
+        'updown': None, 'ctd': None, 'range': None,
+        'diagnostics': {}, 'bottom_track': None,
+        'warnings': [],
+    }
+
     with open(result_file) as f:
         lines = f.readlines()
 
-    z, u, v, err = [], [], [], []
+    current_section = 'VELOCITY'  # default for old-format files (no markers)
+    data_lines = []
+    in_warnings_block = False
+
+    def flush_section():
+        nonlocal data_lines, current_section
+        if current_section is None or not data_lines:
+            data_lines = []
+            return
+
+        arr = np.array(data_lines, dtype=float)
+
+        if current_section == 'VELOCITY':
+            r = {'depth': arr[:, 0], 'u': arr[:, 1],
+                 'v': arr[:, 2], 'uerr': arr[:, 3]}
+            if arr.shape[1] > 4:
+                r['w'] = arr[:, 4]
+            r['speed'] = np.sqrt(r['u']**2 + r['v']**2)
+            result['velocity'] = r
+
+        elif current_section == 'SHEAR':
+            result['shear'] = {
+                'depth': arr[:, 0], 'u_shear': arr[:, 1],
+                'v_shear': arr[:, 2]}
+
+        elif current_section == 'UPDOWN':
+            result['updown'] = {
+                'depth': arr[:, 0],
+                'u_do': arr[:, 1], 'v_do': arr[:, 2],
+                'u_up': arr[:, 3], 'v_up': arr[:, 4]}
+
+        elif current_section == 'CTD':
+            r = {'depth': arr[:, 0], 'pressure': arr[:, 1],
+                 'temperature': arr[:, 2], 'salinity': arr[:, 3]}
+            if arr.shape[1] > 4:
+                r['sound_speed'] = arr[:, 4]
+            if arr.shape[1] > 5:
+                r['n2'] = arr[:, 5]
+            result['ctd'] = r
+
+        elif current_section == 'RANGE':
+            r = {'depth': arr[:, 0], 'range': arr[:, 1]}
+            if arr.shape[1] > 2:
+                r['range_do'] = arr[:, 2]
+            if arr.shape[1] > 3:
+                r['range_up'] = arr[:, 3]
+            result['range'] = r
+
+        data_lines = []
+
     for line in lines:
-        if line.startswith('#'):
-            continue
-        try:
-            vals = [float(x) for x in line.split()]
-            if len(vals) >= 4:
-                z.append(vals[0])
-                u.append(vals[1])
-                v.append(vals[2])
-                err.append(vals[3])
-        except ValueError:
+        raw = line.rstrip('\n')
+        s = line.strip()
+
+        if s.startswith('[') and s.endswith(']'):
+            flush_section()
+            current_section = s[1:-1]
+            in_warnings_block = False
             continue
 
-    return {
-        'depth': np.array(z), 'u': np.array(u), 'v': np.array(v),
-        'uerr': np.array(err),
-    }
+        if s.startswith('#'):
+            content = s[1:].strip()
+
+            if content == 'Warnings:':
+                in_warnings_block = True
+                continue
+
+            # Warning continuation: 2+ spaces after '#' in the raw line
+            is_warning_line = len(raw) > 1 and raw[1:3] == '  '
+            if is_warning_line and in_warnings_block:
+                result['warnings'].append(content)
+                continue
+
+            # Parsing chiave: valore per HEADER / DIAGNOSTICS / BOTTOM_TRACK
+            if ':' in content and current_section in (
+                    'HEADER', 'DIAGNOSTICS', 'BOTTOM_TRACK'):
+                key, _, val = content.partition(':')
+                key = key.strip()
+                val = val.strip()
+                try:
+                    val = float(val)
+                except ValueError:
+                    pass
+
+                if current_section == 'HEADER':
+                    result['header'][key] = val
+                elif current_section == 'DIAGNOSTICS':
+                    result['diagnostics'][key] = val
+                elif current_section == 'BOTTOM_TRACK':
+                    if result['bottom_track'] is None:
+                        result['bottom_track'] = {}
+                    result['bottom_track'][key] = val
+            continue
+
+        if s and not s.startswith('#'):
+            try:
+                vals = [float(x) for x in s.split()]
+                if vals:
+                    data_lines.append(vals)
+            except ValueError:
+                continue
+
+    flush_section()
+
+    # Retrocompatibilita': esponi depth/u/v/uerr/speed al primo livello
+    if result['velocity']:
+        for k in ('depth', 'u', 'v', 'uerr', 'speed'):
+            result[k] = result['velocity'][k]
+
+    return result
+
+
+def extract_processing_warnings(result):
+    """Estrae i warning dal result dict per inclusione nel summary.
+
+    Returns:
+        list di stringhe brevi (max 80 char ciascuna)
+    """
+    warnings = list(result.get('warnings', []))
+    diag = result.get('diagnostics', {})
+
+    mean_err = diag.get('MeanError_m/s', 0)
+    if isinstance(mean_err, (int, float)) and mean_err > 0.10:
+        warnings.append(f'HIGH_ERROR: mean={mean_err:.3f} m/s')
+
+    heading_off = result.get('header', {}).get('HeadingOffset_deg', 0)
+    if isinstance(heading_off, (int, float)) and abs(heading_off) > 10:
+        warnings.append(f'HEADING_OFFSET: {heading_off:.1f} deg')
+
+    return warnings
