@@ -26,8 +26,8 @@ from ladcp_tool.processors.ctd_processor import (
     read_cnv, extract_ctd, compute_derived, bin_profile, save_ldeo_format,
 )
 from ladcp_tool.processors.ldeo_runner import (
-    create_set_cast_params, run_octave_processing, read_ldeo_result,
-    LDEO_PATCHED, LDEO_GEOMAG,
+    create_set_cast_params, run_octave_processing, run_octave_with_retry,
+    read_ldeo_result, LDEO_PATCHED, LDEO_GEOMAG,
 )
 from ladcp_tool.outputs.odv_writer import write_odv_collection
 from ladcp_tool.outputs.plotter import plot_velocity_profile, plot_ctd_profile, plot_combined
@@ -65,6 +65,12 @@ Examples:
                         help='Skip plot generation')
     parser.add_argument('--no-odv', action='store_true',
                         help='Skip ODV file generation')
+    parser.add_argument('--max-memory', type=int, default=0,
+                        help='Max memory (MB) for Octave process (0=unlimited)')
+    parser.add_argument('--adaptive-retry', action='store_true',
+                        help='Retry failed casts with larger bin spacing (avdz)')
+    parser.add_argument('--avdz', type=int, default=None,
+                        help='Override super-ensemble bin spacing (m, default: 5)')
     
     args = parser.parse_args()
     
@@ -185,14 +191,29 @@ Examples:
             else:
                 try:
                     create_set_cast_params(cast, work_dir, f"result_{station}")
-                    success, msg = run_octave_processing(cast, work_dir, args.timeout)
-                    
+
+                    if args.adaptive_retry:
+                        base_avdz = args.avdz or 5
+                        avdz_seq = [base_avdz, base_avdz * 2, base_avdz * 3]
+                        success, msg, err_type, avdz_used = run_octave_with_retry(
+                            cast, work_dir, timeout=args.timeout,
+                            max_memory_mb=args.max_memory,
+                            avdz_sequence=avdz_seq,
+                        )
+                        if avdz_used and avdz_used != base_avdz:
+                            result['avdz_used'] = avdz_used
+                    else:
+                        success, msg, err_type = run_octave_processing(
+                            cast, work_dir, timeout=args.timeout,
+                            max_memory_mb=args.max_memory,
+                            avdz=args.avdz,
+                        )
+
                     if success:
                         result_file = work_dir / f"result_{station}_profile.txt"
                         if result_file.exists():
                             ldeo = read_ldeo_result(result_file)
-                            
-                            # Copy to results dir
+
                             result['ladcp_profile'] = ldeo
                             result['status'] = 'success'
                             result['depth_max'] = np.nanmax(ldeo['depth'])
@@ -202,12 +223,14 @@ Examples:
                             result['v_max'] = np.nanmax(ldeo['v'])
                             result['error_mean'] = np.nanmean(ldeo['uerr'])
                             result['n_levels'] = len(ldeo['depth'])
-                            
+
                             write_velocity_profile(ldeo, station, res_dir)
+                            avdz_note = ''
+                            if result.get('avdz_used'):
+                                avdz_note = f", avdz={result['avdz_used']}m (adapted)"
                             print(f"  LDEO: SUCCESS — {result['n_levels']} levels, "
-                                  f"err={result['error_mean']:.4f} m/s")
-                            
-                            # Plots
+                                  f"err={result['error_mean']:.4f} m/s{avdz_note}")
+
                             if not args.no_plots:
                                 plot_velocity_profile(ldeo, station, plot_dir)
                                 if binned_ctd:
@@ -218,7 +241,8 @@ Examples:
                             print(f"  LDEO: ran but no output file")
                     else:
                         result['status'] = 'octave_failed'
-                        print(f"  LDEO: FAILED — {msg[:200]}")
+                        result['error_type'] = err_type
+                        print(f"  LDEO: FAILED [{err_type}] — {msg[:300]}")
                 except Exception as e:
                     result['status'] = 'error'
                     print(f"  LDEO error: {e}")

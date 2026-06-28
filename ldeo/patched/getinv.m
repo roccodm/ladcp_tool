@@ -711,13 +711,15 @@ end
 de.uocean=uocean;
 de.uctd=uctd;
 de.dfit=[A2,A1]*[uocean(:,1);uctd(:,1)];
-de.A=[A2,A1];
-de.A1o=A1o;
-de.A2o=A2o;
+% store sparse references instead of dense copies to reduce memory
+de.A=sparse([A2,A1]);
+de.A1o=sparse(A1o);
+de.A2o=sparse(A2o);
 de.d_orig=d_orig;
 de.jprof=jprof;
 de.jbin=jbin;
 end
+clear A1o A2o d_orig;
 
 %### solve up and down cast seperately
 if ps.down_up
@@ -1271,23 +1273,32 @@ function [m,me,c,dm,gi]=lesqfit(d,g)
 n=length(d);
 [i,j]=size(g);
 if i~=n; disp(' wrong arguments'),return,end
-in = inv( g' * g);
-gi = in * g';
-m  = gi * d ;
-if nargout<2, return, end
+gtg = g' * g;
+gtd = g' * d;
+m = gtg \ gtd;
+if nargout<2
+  clear gtg gtd;
+  return
+end
 dm = g * m;
 
-me = diag( sqrt( in * ( (d-dm)' * (d-dm)) ./ ( i-j) ) );
-% The inversion error estimates of the ocean-velocity profile
-% are re-scaled above on line marked with %%##%%. Therefore, following
-% line could be substituted for the preceding line of code:
-%	me = diag(sqrt(in));
-% However, doing so changes the error estimates of the BT velocities.
+if nargout>=5
+  in = inv(gtg);
+  gi = in * g';
+  me = diag( sqrt( in * ( (d-dm)' * (d-dm)) ./ ( i-j) ) );
+else
+  % avoid forming explicit inverse when gi is not needed
+  residual_var = (d-dm)' * (d-dm) ./ (i-j);
+  in = inv(gtg);
+  me = diag( sqrt( in * residual_var ) );
+  clear in;
+end
+clear gtg gtd;
 
 if nargout<3, return, end
 co = cov([d,dm]);
 c  = co(1,2) / sqrt( co(1,1)*co(2,2) );
- 
+
 return
 %-------------------------------------------------------------------
 function  X = backsub(A,B)

@@ -448,9 +448,14 @@ if pcs.begin_step <= pcs.cur_step
 
   %
   % check inversion constraints
-  % 
+  %
   p=checkinv(dr,di,de,der,p,ps);
   if existf(de,'bvel'), p=checkbtrk(d,di,de,dr,p); end
+
+  % free inverse diagnostics to reduce memory before shear calculation
+  if exist('de','var'), clear de; end
+  if exist('der','var'), clear der; end
+  if exist('dino','var'), clear dino; end
 
   end_processing_step;
 end % OF STEP 14: CALCULATE INVERSE SOLUTION
@@ -463,11 +468,11 @@ pcs.cur_step = pcs.cur_step + 1;
 if pcs.begin_step <= pcs.cur_step
   pcs.step_name = 'CALCULATE SHEAR SOLUTION'; begin_processing_step;
 
-  % Compute 'old fashioned' shear based solution 
+  % Compute 'old fashioned' shear based solution
   %  two choices, fisrt us all data
   %  second use super ensemble data
   ps=setdefv(ps,'shear',1);
-  
+
   if ps.shear>0
    if ps.shear==1
     [ds,p,dr]=calc_shear3(d,p,ps,dr);		% use all data (d)
