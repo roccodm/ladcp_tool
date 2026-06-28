@@ -150,7 +150,8 @@ Examples:
             
             # LDEO format
             if not args.no_ldeo:
-                save_ldeo_format(ctd_raw, derived, cast_id, ldeo_dir)
+                save_ldeo_format(ctd_raw, derived, cast_id, ldeo_dir,
+                                 pressure_noise=0.5 if ctd_raw.get('used_depth_as_pressure') else 0.0)
                 print(f"  → LDEO: {ldeo_dir}/{cast_id}_ctd_*.txt")
             
             # Plots

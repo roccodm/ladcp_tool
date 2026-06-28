@@ -113,7 +113,11 @@ def extract_ctd(arr, meta):
     """Extract primary CTD variables (P, T, C) and position from CNV data.
     
     Returns dict with: pressure (dbar), temperature (°C ITS-90), 
-    conductivity (S/m), lat, lon, time_elapsed, depth_sbe
+    conductivity (S/m), lat, lon, time_elapsed, depth_sbe.
+
+    Fallback: se manca prDM (pressione), usa depSM (profondità) come
+    pressione approssimata (1 dbar ≈ 1 m). Se manca c0S/m (conduttività
+    in S/m), prova c0mS/cm e converte. Se mancano entrambi, ritorna None.
     """
     names = meta['names']
     
@@ -122,13 +126,31 @@ def extract_ctd(arr, meta):
     i_cond  = _find_col(names, 'c0S/m')
     i_lat   = _find_col(names, 'latitude')
     i_lon   = _find_col(names, 'longitude')
+
+    used_depth_as_pressure = False
+
+    # Fallback: profondità → pressione (1 dbar ≈ 1 m)
+    if i_press is None:
+        i_press = _find_col(names, 'depSM')
+        used_depth_as_pressure = True
+
+    # Fallback: conduttività in mS/cm → S/m (dividi per 10)
+    cond_is_mscm = False
+    if i_cond is None:
+        i_cond = _find_col(names, 'c0mS/cm')
+        if i_cond is not None:
+            cond_is_mscm = True
     
     if i_press is None or i_temp is None or i_cond is None:
         return None
     
     P = arr[:, i_press]
     T = arr[:, i_temp]
-    C = arr[:, i_cond]  # S/m
+    C = arr[:, i_cond]
+
+    # Convert mS/cm → S/m
+    if cond_is_mscm:
+        C = C / 10.0
     
     # Position
     if i_lat is not None and i_lon is not None:
@@ -150,6 +172,7 @@ def extract_ctd(arr, meta):
         'elapsed': elapsed,
         'interval': meta['interval'],
         'start_time': meta['start_time'],
+        'used_depth_as_pressure': used_depth_as_pressure,
     }
 
 
@@ -488,20 +511,30 @@ def compute_ctd_qf(binned, ranges=None):
     return qf
 
 
-def save_ldeo_format(ctd_data, derived, prefix, output_dir):
+def save_ldeo_format(ctd_data, derived, prefix, output_dir, pressure_noise=0.0):
     """Save CTD data in LDEO-compatible ASCII format.
 
     Creates:
       {prefix}_ctd_timeseries.txt — elapsed_sec P T S
       {prefix}_ctd_profile.txt — binned P T S
+
+    Args:
+        pressure_noise: dbar RMS noise to add to pressure column (default 0).
+                        Useful when pressure is derived from depth (bin-averaged
+                        CNV) to prevent LDEO IX spike removal from flagging all
+                        data as spikes due to unrealistically smooth pressure.
     """
     out = Path(output_dir)
     good = derived.get('good_mask', np.ones(len(ctd_data['pressure']), dtype=bool))
+    rng = np.random.default_rng(42)  # seeded for reproducibility
     
     # Time series
+    press = ctd_data['pressure'][good].copy()
+    if pressure_noise > 0:
+        press += rng.normal(0, pressure_noise, len(press))
     ts = np.column_stack([
         ctd_data['elapsed'][good],
-        ctd_data['pressure'][good],
+        press,
         ctd_data['temperature'][good],
         derived['salinity'],
     ])

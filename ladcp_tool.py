@@ -158,7 +158,8 @@ Examples:
                     result['binned_ctd'] = binned_ctd
                     
                     # Save LDEO-compatible CTD ASCII
-                    save_ldeo_format(ctd_raw, derived, station, ctd_ascii_dir)
+                    save_ldeo_format(ctd_raw, derived, station, ctd_ascii_dir,
+                                     pressure_noise=0.5 if ctd_raw.get('used_depth_as_pressure') else 0.0)
                     cast['ctd_timeseries'] = str(ctd_ascii_dir / f"{station}_ctd_timeseries.txt")
                     cast['ctd_profile'] = str(ctd_ascii_dir / f"{station}_ctd_profile.txt")
                     

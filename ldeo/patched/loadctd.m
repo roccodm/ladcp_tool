@@ -375,7 +375,7 @@ nn=0;
 while length(ibad)>9 & nn<10
  z=-p2z(data(:,1),lat);
  wctd=[-diff(z)./(diff(timctd2)*24*3600)];
- ibad=find(abs(wctd)>(3*std(wctd)));
+ ibad=find(abs(wctd-mean(wctd))>(3*std(wctd)));
  ibad=[ibad; ibad+1];
  data(ibad,:)=[];
  timctd(ibad,:)=[];
