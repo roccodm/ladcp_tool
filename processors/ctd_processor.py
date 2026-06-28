@@ -361,9 +361,86 @@ def bin_profile(ctd_data, derived, bin_size=1.0):
     return result
 
 
+def bin_profile_depth(ctd_data, derived, bin_size_m=1.0):
+    """Bin CTD data to uniform depth grid in meters.
+
+    A differenza di bin_profile() che usa la pressione come asse,
+    questa funzione usa la profondita' GSW come coordinata di binning.
+    La profondita' e' calcolata con gsw.z_from_p() per ogni scan e il
+    binning avviene direttamente su griglia metrica uniforme.
+
+    Args:
+        ctd_data: dict da extract_ctd()
+        derived: dict da compute_derived() (deve contenere 'depth')
+        bin_size_m: intervallo del bin in metri (default 1.0)
+
+    Returns:
+        dict analogo a bin_profile() ma con 'depth' come asse primario.
+        La pressione nei bin e' la media delle pressioni degli scan
+        che ricadono nel bin di profondita'.
+    """
+    n = len(ctd_data['pressure'])
+    good = derived.get('good_mask', np.ones(n, dtype=bool))
+
+    # derived['depth'] ha lunghezza sum(good), non len(P): crea array full-length
+    depth_full = np.full(n, np.nan)
+    depth_full[good] = derived['depth']
+
+    finite = np.isfinite(depth_full) & good
+    if not finite.any():
+        return {k: np.array([]) for k in
+                ('depth', 'pressure', 'temperature', 'salinity',
+                 'sigma0', 'density', 'sound_speed', 'pot_temp')}
+
+    d_min = np.floor(np.nanmin(depth_full[finite]))
+    d_max = np.ceil(np.nanmax(depth_full[finite]))
+    edges = np.arange(d_min, d_max + bin_size_m, bin_size_m)
+    centers = edges[:-1] + bin_size_m / 2
+
+    # Array full-length per derived variables (hanno lunghezza sum(good))
+    sal_full = np.full(n, np.nan)
+    sal_full[good] = derived.get('salinity', np.full(good.sum(), np.nan))
+    sig_full = np.full(n, np.nan)
+    sig_full[good] = derived.get('sigma0', np.full(good.sum(), np.nan))
+    rho_full = np.full(n, np.nan)
+    rho_full[good] = derived.get('density', np.full(good.sum(), np.nan))
+    ss_full = np.full(n, np.nan)
+    ss_full[good] = derived.get('sound_speed', np.full(good.sum(), np.nan))
+    pt_full = np.full(n, np.nan)
+    pt_full[good] = derived.get('pot_temp', np.full(good.sum(), np.nan))
+
+    result = {
+        'depth': centers,
+        'pressure': np.full(len(centers), np.nan),
+        'temperature': np.full(len(centers), np.nan),
+        'salinity': np.full(len(centers), np.nan),
+        'sigma0': np.full(len(centers), np.nan),
+        'density': np.full(len(centers), np.nan),
+        'sound_speed': np.full(len(centers), np.nan),
+        'pot_temp': np.full(len(centers), np.nan),
+    }
+
+    for i in range(len(edges) - 1):
+        mask = (depth_full >= edges[i]) & (depth_full < edges[i + 1]) & finite
+        if mask.sum() >= 1:
+            result['pressure'][i] = np.nanmean(ctd_data['pressure'][mask])
+            result['temperature'][i] = np.nanmean(ctd_data['temperature'][mask])
+            result['salinity'][i] = np.nanmean(sal_full[mask])
+            result['sigma0'][i] = np.nanmean(sig_full[mask])
+            result['density'][i] = np.nanmean(rho_full[mask])
+            result['sound_speed'][i] = np.nanmean(ss_full[mask])
+            result['pot_temp'][i] = np.nanmean(pt_full[mask])
+
+    valid = np.isfinite(result['temperature'])
+    for k in result:
+        result[k] = result[k][valid]
+
+    return result
+
+
 def save_ldeo_format(ctd_data, derived, prefix, output_dir):
     """Save CTD data in LDEO-compatible ASCII format.
-    
+
     Creates:
       {prefix}_ctd_timeseries.txt — elapsed_sec P T S
       {prefix}_ctd_profile.txt — binned P T S

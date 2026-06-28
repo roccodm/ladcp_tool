@@ -21,8 +21,8 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ladcp_tool.processors.ctd_processor import (
-    read_cnv, extract_ctd, compute_derived, bin_profile, save_ldeo_format,
-    isolate_downcast, check_pressure_monotonicity,
+    read_cnv, extract_ctd, compute_derived, bin_profile, bin_profile_depth,
+    save_ldeo_format, isolate_downcast, check_pressure_monotonicity,
 )
 from ladcp_tool.outputs.odv_writer import write_odv_collection
 from ladcp_tool.outputs.plotter import plot_ctd_profile, plot_combined
@@ -56,6 +56,9 @@ Examples:
                         help='Skip LDEO-compatible ASCII output')
     parser.add_argument('--include-upcast', action='store_true',
                         help='Include upcast data in profiles (default: downcast only)')
+    parser.add_argument('--bin-axis', choices=['pressure', 'depth'],
+                        default='pressure',
+                        help='Binning axis: pressure (dbar) or depth (m)')
     
     args = parser.parse_args()
     
@@ -79,7 +82,7 @@ Examples:
     print(f"  ctd_tool — CTD Processing with GSW")
     print(f"  Source: {source}")
     print(f"  Output: {output}")
-    print(f"  Bin size: {args.bin_size} dbar")
+    print(f"  Bin size: {args.bin_size} {args.bin_axis}")
     print(f"  Mode: {'downcast + upcast' if args.include_upcast else 'downcast only'}")
     print(f"{'='*60}\n")
     
@@ -119,7 +122,10 @@ Examples:
                           f"{ctd_raw['monotonicity_violations']} scans")
 
             derived = compute_derived(ctd_raw)
-            binned = bin_profile(ctd_raw, derived, bin_size=args.bin_size)
+            if args.bin_axis == 'depth':
+                binned = bin_profile_depth(ctd_raw, derived, bin_size_m=args.bin_size)
+            else:
+                binned = bin_profile(ctd_raw, derived, bin_size=args.bin_size)
             
             n_levels = len(binned['depth'])
             max_depth = np.nanmax(binned['depth'])
