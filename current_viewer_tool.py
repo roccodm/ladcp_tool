@@ -73,9 +73,13 @@ Examples:
                         choices=['u', 'v', 'speed', 'uerr'],
                         help='Genera sezione verticale (default: speed)')
     parser.add_argument('--layer-maps', action='store_true',
-                        help='Genera mappe 2D per ogni strato')
+                        help='Genera mappe 2D per ogni strato (isobate + frecce)')
     parser.add_argument('--all-layers', action='store_true',
                         help='Mostra tutti gli strati sovrapposti al caricamento')
+    parser.add_argument('--no-interpolate', action='store_true',
+                        help='Disattiva interpolazione campo velocita (solo frecce alle stazioni)')
+    parser.add_argument('--grid-n', type=int, default=12,
+                        help='Celle per lato griglia interpolazione (default 12 = 144 frecce/strato)')
 
     args = parser.parse_args()
 
@@ -119,7 +123,9 @@ Examples:
     fig_3d = build_full_scene(
         stations, bathy, slices, target_depths,
         cruise_id=args.cruise_id,
-        show_all_layers=args.all_layers)
+        show_all_layers=args.all_layers,
+        interpolate_field=not args.no_interpolate,
+        grid_n=args.grid_n)
 
     # --- 5. Export ---
     if output.suffix == '.html':
@@ -157,7 +163,10 @@ Examples:
                    else output) / 'layer_maps'
         map_dir.mkdir(exist_ok=True, parents=True)
         for d in target_depths:
-            fig_map = build_layer_map(slices, d)
+            fig_map = build_layer_map(
+                slices, d, bathy=bathy,
+                interpolate_field=not args.no_interpolate,
+                grid_n=args.grid_n)
             if fig_map:
                 map_path = map_dir / f'layer_{d:04d}m.html'
                 fig_map.write_html(str(map_path),

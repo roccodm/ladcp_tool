@@ -283,8 +283,91 @@ def _compute_cone_size_factor(stations):
     return 0.03 * extent
 
 
+def interpolate_velocity_field(layer, grid_n=12, method='linear'):
+    """Interpola il campo di velocita' (U, V) su una griglia regolare.
+
+    Partendo dai punti di stazione (sparsi), produce una griglia
+    regolare grid_n x grid_n di frecce interpolando U e V separatamente.
+    Questo permette di visualizzare un campo di flusso continuo invece
+    di poche frecce isolate alle sole posizioni delle stazioni.
+
+    I punti della griglia che cadono fuori dal convex hull delle
+    stazioni (non interpolabili con metodo 'linear') vengono scartati.
+
+    Args:
+        layer: list of dict da extract_depth_slices() per uno strato
+               (ogni dict ha: lon, lat, u, v, speed, uerr, station)
+        grid_n: numero di celle per lato della griglia (default 12,
+                produce fino a 144 punti)
+        method: 'linear' (default, raccomandato) o 'nearest'
+
+    Returns:
+        list of dict nello stesso formato di layer, ma con i punti
+        interpolati sulla griglia. I punti non interpolabili (NaN)
+        vengono esclusi. I punti corrispondenti alle stazioni reali
+        mantengono il nome della stazione; i punti interpolati hanno
+        station='grid'.
+    """
+    from scipy.interpolate import griddata
+
+    if len(layer) < 3:
+        return list(layer)
+
+    pts = np.array([[p['lon'], p['lat']] for p in layer])
+    u_vals = np.array([p['u'] for p in layer])
+    v_vals = np.array([p['v'] for p in layer])
+    err_vals = np.array([p['uerr'] for p in layer])
+
+    lon_min, lon_max = pts[:, 0].min(), pts[:, 0].max()
+    lat_min, lat_max = pts[:, 1].min(), pts[:, 1].max()
+
+    # Espandi leggermente il bounding box per coprire bene i bordi
+    pad_lon = 0.05 * (lon_max - lon_min)
+    pad_lat = 0.05 * (lat_max - lat_min)
+    lon_grid = np.linspace(lon_min - pad_lon, lon_max + pad_lon, grid_n)
+    lat_grid = np.linspace(lat_min - pad_lat, lat_max + pad_lat, grid_n)
+    lon_mesh, lat_mesh = np.meshgrid(lon_grid, lat_grid)
+    grid_pts = np.column_stack([lon_mesh.ravel(), lat_mesh.ravel()])
+
+    # Interpolazione ibrida: linear dove possibile (dentro convex hull),
+    # nearest come fallback per i punti fuori hull. Questo produce un
+    # campo di flusso denso e visivamente continuo su tutta la griglia.
+    u_linear = griddata(pts, u_vals, grid_pts, method='linear')
+    u_nearest = griddata(pts, u_vals, grid_pts, method='nearest')
+    u_grid = np.where(np.isfinite(u_linear), u_linear, u_nearest)
+
+    v_linear = griddata(pts, v_vals, grid_pts, method='linear')
+    v_nearest = griddata(pts, v_vals, grid_pts, method='nearest')
+    v_grid = np.where(np.isfinite(v_linear), v_linear, v_nearest)
+
+    err_grid = griddata(pts, err_vals, grid_pts, method='nearest')
+
+    field = []
+    for i in range(len(grid_pts)):
+        u_i = u_grid[i]
+        v_i = v_grid[i]
+        if not (np.isfinite(u_i) and np.isfinite(v_i)):
+            continue
+        err_i = err_grid[i] if np.isfinite(err_grid[i]) else np.nan
+        speed_i = float(np.sqrt(u_i**2 + v_i**2))
+        direction_i = float(np.degrees(np.arctan2(u_i, v_i)) % 360)
+        field.append({
+            'station': 'grid',
+            'lat': float(grid_pts[i, 1]),
+            'lon': float(grid_pts[i, 0]),
+            'u': float(u_i),
+            'v': float(v_i),
+            'speed': speed_i,
+            'uerr': float(err_i) if np.isfinite(err_i) else 0.0,
+            'direction_deg': direction_i,
+        })
+
+    return field
+
+
 def build_velocity_cones(slices, target_depth, speed_range,
-                         visible=True, cone_size_factor=0.015):
+                         visible=True, cone_size_factor=0.015,
+                         field=None):
     """Costruisce i coni vettoriali per un singolo strato.
 
     Fix 1 (vs guidelines3d): il documento usava
@@ -292,8 +375,18 @@ def build_velocity_cones(slices, target_depth, speed_range,
     non accetta None per colorbar. Qui la colorbar viene passata solo
     quando target_depth corrisponde al primo strato, via kwargs
     condizionale.
+
+    Args:
+        slices: dict da extract_depth_slices()
+        target_depth: profondita' dello strato (m)
+        speed_range: (min, max) per normalizzazione colore
+        visible: se il trace e' visibile al caricamento
+        cone_size_factor: scala dei coni
+        field: lista di punti interpolati da interpolate_velocity_field().
+               Se fornito, usa il campo interpolato (griglia densa)
+               invece delle sole stazioni. Se None, usa le stazioni.
     """
-    layer = slices.get(target_depth, [])
+    layer = field if field is not None else slices.get(target_depth, [])
 
     if not layer:
         return None
@@ -312,8 +405,8 @@ def build_velocity_cones(slices, target_depth, speed_range,
         f"U: {u[i]:.3f} m/s<br>"
         f"V: {v[i]:.3f} m/s<br>"
         f"Speed: {speed[i]:.3f} m/s<br>"
-        f"Dir: {layer[i]['direction_deg']:.0f}<br>"
-        f"Error: {layer[i]['uerr']:.3f} m/s"
+        f"Dir: {layer[i].get('direction_deg', 0):.0f}<br>"
+        f"Error: {layer[i].get('uerr', 0):.3f} m/s"
         for i in range(len(layer))
     ]
 
@@ -424,7 +517,8 @@ def build_sea_surface(bathy, opacity=0.15):
 # ---------- 4. Assemblaggio figura ----------
 
 def build_full_scene(stations, bathy, slices, target_depths,
-                     cruise_id='TUNSIC26', show_all_layers=False):
+                     cruise_id='TUNSIC26', show_all_layers=False,
+                     interpolate_field=True, grid_n=12):
     """Assembla la scena 3D completa.
 
     Costruisce una figura Plotly con:
@@ -432,6 +526,19 @@ def build_full_scene(stations, bathy, slices, target_depths,
     - Piano semitrasparente della superficie del mare
     - Colonne verticali delle stazioni
     - Coni vettoriali per ogni strato (con dropdown di selezione)
+
+    Args:
+        stations: lista da load_all_stations()
+        bathy: dict da load_bathymetry()
+        slices: dict da extract_depth_slices()
+        target_depths: lista delle profondita' target
+        cruise_id: ID crociera per il titolo
+        show_all_layers: se True, mostra tutti gli strati sovrapposti
+        interpolate_field: se True (default), interpola U/V su griglia
+                           regolare (grid_n x grid_n) per visualizzare
+                           un campo di flusso denso invece delle sole
+                           frecce alle stazioni
+        grid_n: celle per lato della griglia di interpolazione (default 12)
 
     Returns:
         go.Figure configurata e pronta per export
@@ -456,10 +563,16 @@ def build_full_scene(stations, bathy, slices, target_depths,
 
     cone_traces = []
     for i, target_z in enumerate(target_depths):
+        layer = slices.get(target_z, [])
+        field = None
+        if interpolate_field and len(layer) >= 3:
+            field = interpolate_velocity_field(layer, grid_n=grid_n)
+
         cone = build_velocity_cones(
             slices, target_z, speed_range,
             visible=(show_all_layers or i == 0),
             cone_size_factor=cone_size_factor,
+            field=field,
         )
         if cone is not None:
             cone_traces.append((target_z, cone))
@@ -557,35 +670,76 @@ def build_full_scene(stations, bathy, slices, target_depths,
 
 # ---------- 5. Mappe 2D per strato ----------
 
-def build_layer_map(slices, target_depth, mapbox_style='open-street-map'):
+def build_layer_map(slices, target_depth, bathy=None,
+                    interpolate_field=True, grid_n=12):
     """Costruisce una mappa 2D con frecce di corrente per uno strato.
 
-    Fix 3 (vs guidelines3d): il documento usava marker con array di
-    simboli per-point (['circle', 'triangle-up']) che non e' supportato
-    in modo affidabile su Scattermapbox. Qui si usano due trace
-    separate: una linea (fusto della freccia) e un marker triangle
-    singolo alla punta.
+    Sostituisce l'implementazione originale basata su Scattermapbox
+    con tile OSM (problemi di licenza). Questa versione usa:
+    - go.Contour per le isobate batimetriche (sfondo)
+    - go.Scatter per le frecce di corrente (fusto + punta)
+    - Annotazioni per le etichette delle stazioni
+
+    Le frecce sono interpolate su griglia regolare (se
+    interpolate_field=True) per visualizzare il campo di flusso.
 
     Args:
         slices: dict da extract_depth_slices()
         target_depth: profondita' dello strato (m)
-        mapbox_style: stile mappa ('open-street-map', 'carto-positron')
+        bathy: dict da load_bathymetry() per le isobate (opzionale;
+               se None, nessuna isobata di sfondo)
+        interpolate_field: se True, interpola U/V su griglia densa
+        grid_n: celle per lato della griglia di interpolazione
 
     Returns:
-        go.Figure con mappa Mapbox
+        go.Figure con mappa 2D (asse lon/lat, niente tile esterni)
     """
     layer = slices.get(target_depth, [])
     if not layer:
         return None
 
+    # Campo interpolato per visualizzare il flusso
+    field = None
+    if interpolate_field and len(layer) >= 3:
+        field = interpolate_velocity_field(layer, grid_n=grid_n)
+    arrow_points = field if field is not None else layer
+
     fig = go.Figure()
 
-    arrow_scale = 0.025
+    # --- Sfondo: isobate batimetriche (contour) ---
+    if bathy is not None:
+        fig.add_trace(go.Contour(
+            z=bathy['elevation'],
+            x=bathy['lon_grid'],
+            y=bathy['lat_grid'],
+            contours=dict(
+                start=-800, end=0, size=100,
+                showlabels=True,
+                labelfont=dict(size=9, color='rgba(40,40,40,0.7)'),
+            ),
+            colorscale=[[0, '#04342C'], [1, '#9ED4C4']],
+            opacity=0.5,
+            showscale=False,
+            name='Isobate',
+            hoverinfo='skip',
+            line=dict(width=1, color='rgba(15,110,86,0.6)'),
+        ))
 
-    for p in layer:
+    # --- Frecce di corrente ---
+    # Scala: gradi per 1 m/s. Calibrata sull'estensione spaziale.
+    lons = [p['lon'] for p in arrow_points]
+    lats = [p['lat'] for p in arrow_points]
+    extent = max(max(lons) - min(lons), max(lats) - min(lats))
+    if extent <= 0:
+        extent = 1.0
+    arrow_scale = 0.15 * extent  # frecce ~15% dell'estensione per 1 m/s
+
+    # Per frecce piu' leggere (punti griglia), riduci opacita'
+    is_grid = [p['station'] == 'grid' for p in arrow_points]
+
+    for i, p in enumerate(arrow_points):
         lon0 = p['lon']
         lat0 = p['lat']
-
         dlon = p['u'] * arrow_scale
         dlat = p['v'] * arrow_scale
         lon1 = lon0 + dlon
@@ -596,34 +750,42 @@ def build_layer_map(slices, target_depth, mapbox_style='open-street-map'):
         g = int(120 + norm_speed * (73 - 120))
         b = int(214 + norm_speed * (72 - 214))
         color = f'rgb({r},{g},{b})'
+        alpha = 0.5 if is_grid[i] else 1.0
+        line_w = 1.5 if is_grid[i] else 3.0
 
-        # Fusto della freccia (linea)
-        fig.add_trace(go.Scattermapbox(
-            lon=[lon0, lon1],
-            lat=[lat0, lat1],
+        # Fusto della freccia
+        fig.add_trace(go.Scatter(
+            x=[lon0, lon1],
+            y=[lat0, lat1],
             mode='lines',
-            line=dict(width=3, color=color),
-            text=f"{p['station']}: {p['speed']:.2f} m/s",
+            line=dict(width=line_w, color=color),
+            opacity=alpha,
+            text=f"{p['station']}: {p['speed']:.2f} m/s, dir {p.get('direction_deg', 0):.0f}",
             hoverinfo='text',
             showlegend=False,
         ))
 
-        # Punta della freccia (marker triangolo singolo)
-        fig.add_trace(go.Scattermapbox(
-            lon=[lon1],
-            lat=[lat1],
+        # Punta (marker triangolo)
+        fig.add_trace(go.Scatter(
+            x=[lon1],
+            y=[lat1],
             mode='markers',
-            marker=dict(size=12, symbol='triangle',
-                        color=color, angle=0),
+            marker=dict(size=8 if is_grid[i] else 12,
+                        symbol='triangle-up',
+                        color=color),
+            opacity=alpha,
             hoverinfo='skip',
             showlegend=False,
         ))
 
-        # Etichetta stazione
-        fig.add_trace(go.Scattermapbox(
-            lon=[lon0],
-            lat=[lat0],
-            mode='text',
+    # --- Etichette stazioni reali (non grid) ---
+    real_stations = [p for p in layer if p['station'] != 'grid']
+    for p in real_stations:
+        fig.add_trace(go.Scatter(
+            x=[p['lon']],
+            y=[p['lat']],
+            mode='markers+text',
+            marker=dict(size=7, color='#3d3d3a', symbol='circle'),
             text=[p['station']],
             textfont=dict(size=9, color='#3d3d3a'),
             textposition='top center',
@@ -631,18 +793,15 @@ def build_layer_map(slices, target_depth, mapbox_style='open-street-map'):
             hoverinfo='skip',
         ))
 
-    center_lat = float(np.mean([p['lat'] for p in layer]))
-    center_lon = float(np.mean([p['lon'] for p in layer]))
-
+    # --- Layout ---
     fig.update_layout(
-        mapbox=dict(
-            style=mapbox_style,
-            center=dict(lat=center_lat, lon=center_lon),
-            zoom=9,
-        ),
         title=f'Correnti LADCP a {target_depth} m',
-        margin=dict(l=0, r=0, t=40, b=0),
-        height=600,
+        xaxis=dict(title='Longitudine (E)', scaleanchor='y',
+                   scaleratio=1),
+        yaxis=dict(title='Latitudine (N)'),
+        margin=dict(l=60, r=20, t=50, b=50),
+        height=650,
+        plot_bgcolor='rgba(245,245,240,0.9)',
     )
 
     return fig
