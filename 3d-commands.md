@@ -21,7 +21,7 @@ Produce:
 - `current_3d_stations.html` — vettori solo alle stazioni
 - `current_3d_interpolated.html` — vettori su griglia interpolata 12×12
 
-## Con layer maps (mappe 2D per ogni strato)
+## Con layer maps (mappe 2D per ogni strato) + PNG
 
 ```bash
 python3 /home/rocco/ladcp_tool/current_viewer_tool.py \
@@ -29,10 +29,12 @@ python3 /home/rocco/ladcp_tool/current_viewer_tool.py \
     -d /home/rocco/Processed2/output_ladcp_final/odv/ \
     -g /home/rocco/ladcp_tool/data/gebco_central_mediterranean.tif \
     -o /home/rocco/Processed2/output_3d_v131/ \
-    --all-layers --layer-maps
+    --all-layers --layer-maps --export-png
 ```
 
-Produce anche `layer_maps/layer_{depth}m.html` per ogni strato.
+Produce:
+- `layer_maps/layer_{depth}m.html` per ogni strato
+- `layer_maps/layer_{depth}m.png` (~250 KB ciascuno)
 
 ## Sezione verticale (opzionale)
 
@@ -53,5 +55,6 @@ python3 /home/rocco/ladcp_tool/current_viewer_tool.py \
 | `--all-layers` | Mostra tutti gli strati sovrapposti all'apertura |
 | `--no-interpolate` | Disabilita il campo interpolato (solo stazioni) |
 | `--grid-n 8` | Griglia interpolazione piu' rada (default: 12) |
+| `--export-png` | Esporta layer maps anche in PNG (richiede Chrome) |
 | `--bathy-resolution 100` | Riduce risoluzione GEBCO per debug |
 | `--bathy-margin 0.2` | Margine GEBCO intorno alle stazioni (gradi) |

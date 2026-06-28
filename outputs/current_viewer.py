@@ -721,7 +721,6 @@ def build_full_scene(stations, bathy, slices, target_depths,
                 backgroundcolor='rgba(240,240,235,0.3)',
                 gridcolor='rgba(200,200,195,0.3)',
                 showbackground=True,
-                autorange='reversed',
             ),
             aspectmode='manual',
             aspectratio=dict(

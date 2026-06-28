@@ -80,6 +80,8 @@ Examples:
                         help='Disattiva interpolazione campo velocita (solo frecce alle stazioni)')
     parser.add_argument('--grid-n', type=int, default=12,
                         help='Celle per lato griglia interpolazione (default 12 = 144 frecce/strato)')
+    parser.add_argument('--export-png', action='store_true',
+                        help='Esporta layer maps anche in PNG (richiede Chrome per kaleido)')
 
     args = parser.parse_args()
 
@@ -190,6 +192,11 @@ Examples:
                                    include_plotlyjs=True,
                                    full_html=True)
                 print(f'  Layer map: {map_path}')
+                if args.export_png:
+                    png_path = map_dir / f'layer_{d:04d}m.png'
+                    fig_map.write_image(str(png_path),
+                                        width=1200, height=900)
+                    print(f'  Layer PNG: {png_path}')
 
     print(f'\n  Done. Open HTML files in browser.')
 
