@@ -283,7 +283,72 @@ def _compute_cone_size_factor(stations):
     return 0.03 * extent
 
 
-def interpolate_velocity_field(layer, grid_n=12, method='linear'):
+def _seafloor_depth_at(bathy, lons, lats):
+    """Profondita' del fondale (m, positiva) da GEBCO per lista di punti.
+
+    Usa RegularGridInterpolator su (lat, lon). I punti fuori griglia
+    restituiscono inf (cosi' i coni vengono mantenuti per default:
+    meglio mostrare un cono in piu' che perderne uno valido).
+
+    Args:
+        bathy: dict da load_bathymetry() con lon_grid, lat_grid, elevation
+        lons: array/sequence di longitudini
+        lats: array/sequence di latitudini
+
+    Returns:
+        np.array di profondita' positive (m). inf = fuori griglia GEBCO.
+    """
+    from scipy.interpolate import RegularGridInterpolator
+
+    lat_g = np.asarray(bathy['lat_grid'])
+    lon_g = np.asarray(bathy['lon_grid'])
+    elev = np.asarray(bathy['elevation'])
+
+    # depth = -elevation (positivo per il fondale). NaN-elevation -> inf.
+    depth_grid = -elev
+    depth_grid = np.where(np.isfinite(depth_grid), depth_grid, np.inf)
+
+    interp = RegularGridInterpolator(
+        (lat_g, lon_g), depth_grid,
+        bounds_error=False, fill_value=np.inf)
+
+    pts = np.column_stack([np.asarray(lats), np.asarray(lons)])
+    return interp(pts)
+
+
+def _filter_by_seafloor(points, target_depth, bathy, tolerance=10.0):
+    """Filtra i punti dove target_depth supera il fondale locale.
+
+    Rimuove i coni che finirebbero sotto la superficie batimetrica
+    nella scena 3D. Un cono a 400 m di profondita' su un fondale a
+    300 m non ha senso fisico e visualmente appare sotto il fondale.
+
+    Args:
+        points: list of dict con 'lon', 'lat' (strato da slices o field)
+        target_depth: profondita' dello strato (m, positiva)
+        bathy: dict da load_bathymetry() (None = nessun filtraggio)
+        tolerance: margine (m) per trattenere coni vicini al fondale
+                   (LADCP misura vicino al fondo; GEBCO ha ~450m res.)
+
+    Returns:
+        list of dict filtrata (solo punti sopra il fondale)
+    """
+    if bathy is None or not points:
+        return points
+
+    lons = np.array([p['lon'] for p in points])
+    lats = np.array([p['lat'] for p in points])
+    seafloor = _seafloor_depth_at(bathy, lons, lats)
+
+    kept = []
+    for i, p in enumerate(points):
+        if target_depth <= seafloor[i] + tolerance:
+            kept.append(p)
+    return kept
+
+
+def interpolate_velocity_field(layer, grid_n=12, method='linear',
+                               bathy=None, target_depth=None):
     """Interpola il campo di velocita' (U, V) su una griglia regolare.
 
     Partendo dai punti di stazione (sparsi), produce una griglia
@@ -294,19 +359,20 @@ def interpolate_velocity_field(layer, grid_n=12, method='linear'):
     I punti della griglia che cadono fuori dal convex hull delle
     stazioni (non interpolabili con metodo 'linear') vengono scartati.
 
+    Se bathy e target_depth sono forniti, i punti grid che cadono sopra
+    un fondale piu' shallow del target depth vengono rimossi (evita
+    frecce sotto il fondale nella scena 3D).
+
     Args:
         layer: list of dict da extract_depth_slices() per uno strato
-               (ogni dict ha: lon, lat, u, v, speed, uerr, station)
-        grid_n: numero di celle per lato della griglia (default 12,
-                produce fino a 144 punti)
-        method: 'linear' (default, raccomandato) o 'nearest'
+        grid_n: numero di celle per lato della griglia (default 12)
+        method: 'linear' (default) o 'nearest' (fallback interno)
+        bathy: dict da load_bathymetry() per filtraggio fondale (opt.)
+        target_depth: profondita' dello strato (m, per filtraggio)
 
     Returns:
-        list of dict nello stesso formato di layer, ma con i punti
-        interpolati sulla griglia. I punti non interpolabili (NaN)
-        vengono esclusi. I punti corrispondenti alle stazioni reali
-        mantengono il nome della stazione; i punti interpolati hanno
-        station='grid'.
+        list of dict nello stesso formato di layer. I punti interpolati
+        hanno station='grid'.
     """
     from scipy.interpolate import griddata
 
@@ -362,12 +428,16 @@ def interpolate_velocity_field(layer, grid_n=12, method='linear'):
             'direction_deg': direction_i,
         })
 
+    # Filtra punti grid sotto il fondale (se bathy fornito)
+    if bathy is not None and target_depth is not None:
+        field = _filter_by_seafloor(field, target_depth, bathy)
+
     return field
 
 
 def build_velocity_cones(slices, target_depth, speed_range,
                          visible=True, cone_size_factor=0.015,
-                         field=None):
+                         field=None, bathy=None):
     """Costruisce i coni vettoriali per un singolo strato.
 
     Fix 1 (vs guidelines3d): il documento usava
@@ -376,17 +446,27 @@ def build_velocity_cones(slices, target_depth, speed_range,
     quando target_depth corrisponde al primo strato, via kwargs
     condizionale.
 
+    Fix Z (v1.3.1): se bathy e' fornito, i coni che cadrebbero sotto
+    il fondale GEBCO (target_depth > profondita' fondale locale) vengono
+    rimossi. Questo risolve il bug dei vettori sotto il fondale.
+
     Args:
         slices: dict da extract_depth_slices()
         target_depth: profondita' dello strato (m)
         speed_range: (min, max) per normalizzazione colore
         visible: se il trace e' visibile al caricamento
         cone_size_factor: scala dei coni
-        field: lista di punti interpolati da interpolate_velocity_field().
-               Se fornito, usa il campo interpolato (griglia densa)
-               invece delle sole stazioni. Se None, usa le stazioni.
+        field: lista di punti interpolati (se None, usa le stazioni)
+        bathy: dict da load_bathymetry() per filtraggio fondale
     """
     layer = field if field is not None else slices.get(target_depth, [])
+
+    if not layer:
+        return None
+
+    # Filtra coni sotto il fondale
+    if bathy is not None:
+        layer = _filter_by_seafloor(layer, target_depth, bathy)
 
     if not layer:
         return None
@@ -566,13 +646,15 @@ def build_full_scene(stations, bathy, slices, target_depths,
         layer = slices.get(target_z, [])
         field = None
         if interpolate_field and len(layer) >= 3:
-            field = interpolate_velocity_field(layer, grid_n=grid_n)
+            field = interpolate_velocity_field(
+                layer, grid_n=grid_n, bathy=bathy, target_depth=target_z)
 
         cone = build_velocity_cones(
             slices, target_z, speed_range,
             visible=(show_all_layers or i == 0),
             cone_size_factor=cone_size_factor,
             field=field,
+            bathy=bathy,
         )
         if cone is not None:
             cone_traces.append((target_z, cone))
@@ -701,8 +783,16 @@ def build_layer_map(slices, target_depth, bathy=None,
     # Campo interpolato per visualizzare il flusso
     field = None
     if interpolate_field and len(layer) >= 3:
-        field = interpolate_velocity_field(layer, grid_n=grid_n)
+        field = interpolate_velocity_field(
+            layer, grid_n=grid_n, bathy=bathy, target_depth=target_depth)
     arrow_points = field if field is not None else layer
+
+    # Filtra frecce sotto il fondale (coerenza con scena 3D)
+    if bathy is not None:
+        arrow_points = _filter_by_seafloor(arrow_points, target_depth, bathy)
+
+    if not arrow_points:
+        return None
 
     fig = go.Figure()
 

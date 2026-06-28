@@ -118,9 +118,19 @@ Examples:
     for d, layer in slices.items():
         print(f'  Depth {d:>4d} m: {len(layer)} stations')
 
-    # --- 4. Costruisci scena 3D ---
-    print(f'  Building 3D scene...')
-    fig_3d = build_full_scene(
+    # --- 4. Costruisci scene 3D (due varianti) ---
+    # Variante A: vettori non interpolati (solo stazioni)
+    print(f'  Building 3D scene (stations only)...')
+    fig_stations = build_full_scene(
+        stations, bathy, slices, target_depths,
+        cruise_id=args.cruise_id,
+        show_all_layers=args.all_layers,
+        interpolate_field=False,
+        grid_n=args.grid_n)
+
+    # Variante B: vettori interpolati su griglia
+    print(f'  Building 3D scene (interpolated field)...')
+    fig_interp = build_full_scene(
         stations, bathy, slices, target_depths,
         cruise_id=args.cruise_id,
         show_all_layers=args.all_layers,
@@ -128,24 +138,31 @@ Examples:
         grid_n=args.grid_n)
 
     # --- 5. Export ---
+    html_config = {
+        'displayModeBar': True,
+        'scrollZoom': True,
+        'modeBarButtonsToAdd': ['downloadImage'],
+    }
+
     if output.suffix == '.html':
+        # Singolo file: usa la variante interpolata (o station se --no-interpolate)
         output.parent.mkdir(exist_ok=True, parents=True)
-        fig_3d.write_html(
-            str(output),
-            include_plotlyjs=True,
-            full_html=True,
-            config={
-                'displayModeBar': True,
-                'scrollZoom': True,
-                'modeBarButtonsToAdd': ['downloadImage'],
-            },
-        )
+        primary = fig_interp if not args.no_interpolate else fig_stations
+        primary.write_html(str(output), include_plotlyjs=True,
+                           full_html=True, config=html_config)
         print(f'  3D scene: {output}')
     else:
+        # Directory: produci entrambe le varianti
         output.mkdir(exist_ok=True, parents=True)
-        fig_3d.write_html(str(output / 'current_3d.html'),
-                          include_plotlyjs=True, full_html=True)
-        print(f'  3D scene: {output / "current_3d.html"}')
+        fig_stations.write_html(
+            str(output / 'current_3d_stations.html'),
+            include_plotlyjs=True, full_html=True, config=html_config)
+        print(f'  3D scene (stations): {output / "current_3d_stations.html"}')
+
+        fig_interp.write_html(
+            str(output / 'current_3d_interpolated.html'),
+            include_plotlyjs=True, full_html=True, config=html_config)
+        print(f'  3D scene (interpolated): {output / "current_3d_interpolated.html"}')
 
     # --- 6. Sezione verticale (opzionale) ---
     if args.section:
