@@ -549,6 +549,9 @@ if pcs.begin_step <= pcs.cur_step
   if existf(d,'ctdprof_ss')
     dr.ctd_ss=interp1(d.ctdprof_z,d.ctdprof_ss,dr.z);
   end
+  if existf(d,'ctdprof_N2')
+    dr.ctd_N2=interp1(d.ctdprof_z,d.ctdprof_N2,dr.z);
+  end
 
   if exist('post_process_cast','file')	% cruise-specific post-processing
     post_process_cast;
