@@ -63,6 +63,11 @@ Thumbs.db
 *.log
 batch_output*.log
 
+# Large data files (not redistributable, local only)
+data/*.tif
+data/*.tiff
+data/*.nc
+
 # BUT keep these as source (bundled with package)
 !ldeo/**/*.m
 !ldeo/**/*.mat
