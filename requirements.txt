@@ -6,3 +6,5 @@ cftime>=1.6
 netCDF4>=1.6
 openpyxl>=3.1
 seawater>=3.3
+plotly>=5.20
+rasterio>=1.3
