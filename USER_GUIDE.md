@@ -135,8 +135,10 @@ ctd_tool -s <source-dir> -o <output-dir> [options]
 |-----------|----------|---------|-------------|
 | `-s`, `--source-dir` | Yes | — | Directory with `.cnv` files |
 | `-o`, `--output-dir` | Yes | — | Output root directory |
-| `--bin-size` | No | `1.0` | Pressure bin width (dbar) |
+| `--bin-size` | No | `1.0` | Pressure/depth bin width (dbar or m) |
+| `--bin-axis` | No | `pressure` | Binning axis: `pressure` (dbar) or `depth` (m) |
 | `--cruise-id` | No | `TUNSIC26` | Cruise identifier for output files |
+| `--include-upcast` | No | — | Include upcast data (default: downcast only) |
 | `--no-plots` | No | — | Skip plot generation |
 | `--no-odv` | No | — | Skip ODV file generation |
 | `--no-ldeo` | No | — | Skip LDEO-compatible ASCII output |
@@ -145,7 +147,9 @@ ctd_tool -s <source-dir> -o <output-dir> [options]
 
 1. **Read CNV**: Parse Sea-Bird `.cnv` header and data columns
 2. **Extract core variables**: Pressure (dbar), Temperature (°C ITS-90), Conductivity (S/m)
-3. **Compute derived (GSW)**:
+3. **Downcast isolation** (default): Identify max-pressure scan via 5-point median
+   filter, retain surface-to-bottom scans, remove pressure inversions
+4. **Compute derived (GSW)**:
    - Practical Salinity (PSU) — `gsw.SP_from_C`
    - Absolute Salinity — `gsw.SA_from_SP`
    - Potential Temperature (°C) — `gsw.pt0_from_t`
@@ -192,6 +196,9 @@ ladcp_tool -s <source-dir> -o <output-dir> [options]
 | `--cruise-id` | No | `TUNSIC26` | Cruise identifier |
 | `--no-plots` | No | — | Skip plot generation |
 | `--no-odv` | No | — | Skip ODV file generation |
+| `--max-memory` | No | `0` | Max RSS (MB) for Octave process (0=unlimited) |
+| `--adaptive-retry` | No | — | Retry failed casts with larger bin spacing (avdz) |
+| `--avdz` | No | `5` | Override super-ensemble bin spacing (m) |
 
 ### Processing Pipeline
 
@@ -264,20 +271,48 @@ output_dir/
 
 ### Velocity Profile Format
 
+The LDEO `savearch.m` produces a structured ASCII file with 8 sections:
 ```
-# Depth(m)  U(m/s)  V(m/s)  Error(m/s)  Speed(m/s)
-     5.0    0.1106  -0.1646      0.1074    0.1983
-    10.0    0.1106  -0.1646      0.1068    0.1983
+[HEADER]       — cast metadata, processing parameters
+[VELOCITY]     — Depth U V Uerr [W] (main inverse solution)
+[SHEAR]        — Depth U_shear V_shear (shear method, if available)
+[UPDOWN]       — Depth U_down V_down U_up V_up (per-instrument)
+[CTD]          — Depth Pressure Temp Sal [SoundSpeed] [N2]
+[RANGE]        — Depth Range [Range_down] [Range_up]
+[DIAGNOSTICS]  — MeanError, MaxError, warnings
+[BOTTOM_TRACK] — bottom depth, BT velocities
 ```
+
+The `result_<cast>_profile.txt` file is backward-compatible: the
+`[VELOCITY]` section contains the same 4-column format (Depth U V Error)
+as the original, plus an optional W column. Old parsers that ignore
+section markers will still read the velocity data.
 
 ### ODV Spreadsheet Format
 
-Tab-separated with standard ODV headers. Columns:
+Tab-separated with standard ODV headers. Columns (15 total):
 ```
-Pressure [dbar]  Depth [m]  Temperature [deg C]  Salinity [PSU]
-SigmaTheta [kg/m3]  SoundSpeed [m/s]  U [m/s]  V [m/s]
-U_Error [m/s]  PotTemp [deg C]
+Pressure [dbar]  Depth [m]  Temperature [deg C]  QF:Temperature
+Salinity [PSU]  QF:Salinity  SigmaTheta [kg/m3]  QF:SigmaTheta
+SoundSpeed [m/s]  U [m/s]  QF:U  V [m/s]  QF:V  U_Error [m/s]  PotTemp [deg C]
 ```
+
+Quality flags (ODV/SeaDataNet convention):
+- `1` = good (within physical range)
+- `3` = questionable (at range limits)
+- `4` = bad (outside physical range)
+- `9` = missing (NaN)
+
+CTD QF ranges (Mediterranean, configurable in `ctd_processor.py`):
+- Temperature: good -2..35 °C, warn -2.5..40
+- Salinity: good 2..42 PSU, warn 0..45
+- SigmaTheta: good 18..30 kg/m³, warn 15..32
+
+Velocity QF thresholds (configurable in `odv_writer.py`):
+- QF=1: inversion error ≤0.05 m/s
+- QF=2: error 0.05–0.10 m/s
+- QF=3: error >0.10 m/s or speed >2.0 m/s
+- QF=4: speed >3.0 m/s
 
 ---
 

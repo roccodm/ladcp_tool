@@ -260,7 +260,7 @@ profiling method in 17 steps:
 | 14 | `getinv.m` | **Inverse solution** — weighted least-squares velocity profile |
 | 15 | `calc_shear3.m` | **Shear method** — baroclinic velocity from vertical shear |
 | 16 | `plotinv.m` | Diagnostic plots (stubbed in Octave) |
-| 17 | `savearch.m` | Save results (stubbed as ASCII writer) |
+| 17 | `savearch.m` | Save structured ASCII results (8 sections) |
 
 #### Inverse Solution (Step 14)
 
@@ -329,7 +329,7 @@ applied for GNU Octave 8.4.0 compatibility:
 | `fill()` args | MATLAB-specific | → stubbed | `plotinv.m`, `checkbtrk.m`, `checkinv.m` |
 | `bar(...,'stack')` | → `bar(...,'stacked')` | stubbed | `checkinv.m` |
 | `pcolorn` | MATLAB-specific colormap | → stubbed | `pcolorn.m` |
-| `savearch` diagnostics | Complex struct output | → simple ASCII writer | `savearch.m` |
+| `savearch` diagnostics | Complex struct output | → structured 8-section ASCII writer | `savearch.m` |
 
 The patched files are in `TUNSIC26/04-LDEO-IX/patched/`. The original files
 are preserved in `TUNSIC26/04-LDEO-IX/original/`.
@@ -389,12 +389,27 @@ read_cnv(filepath) → (array, meta_dict)
 extract_ctd(array, meta) → dict
     Extract P, T, C, position, elapsed time from CNV data.
 
+isolate_downcast(ctd_data) → dict
+    Extract downcast only: median-filter max pressure + monotonicity filter.
+    Adds n_scans_raw, n_scans_downcast, p_max_index, upcast_excluded,
+    monotonicity_violations.
+
+check_pressure_monotonicity(ctd_data, fix=True) → dict
+    Standalone pressure inversion detection/removal (for upcast mode).
+
 compute_derived(ctd_data) → dict
     Compute GSW-derived variables: salinity, pot_temp, sigma0, density,
     sound_speed, depth. Returns masked arrays with good_mask.
 
 bin_profile(ctd_data, derived, bin_size=1.0) → dict
     Average CTD data to uniform pressure bins.
+
+bin_profile_depth(ctd_data, derived, bin_size_m=1.0) → dict
+    Average CTD data to uniform depth bins (meters, via GSW z_from_p).
+
+compute_ctd_qf(binned, ranges=None) → dict
+    Assign ODV/SeaDataNet quality flags (MEDITERRANEAN_RANGES constant).
+    Returns '{var}_qf' arrays (QF 1/3/4/9).
 
 save_ldeo_format(ctd_data, derived, prefix, output_dir) → binned_dict
     Write LDEO-compatible ASCII time series + profile files.
@@ -426,11 +441,25 @@ Binary parsing constants:
 create_set_cast_params(cast, work_dir, output_prefix) → Path
     Generate Octave set_cast_params.m for a cast.
 
-run_octave_processing(cast, work_dir, timeout=600) → (bool, stdout_tail)
-    Execute Octave processing as subprocess.
+run_octave_processing(cast, work_dir, timeout=600, max_memory_mb=0,
+                      avdz=None, stream_output=True) → (success, message, error_type)
+    Execute Octave processing as subprocess. Monitors RSS memory,
+    classifies errors (MEMORY, MATRIX_DIM, SINGULAR, TIMEOUT, etc.).
+
+run_octave_with_retry(cast, work_dir, timeout=600, max_memory_mb=0,
+                      avdz_sequence=None, stream_output=True) → (success, message, error_type, avdz_used)
+    Adaptive retry with progressively larger avdz on memory failures.
 
 read_ldeo_result(result_file) → dict
-    Parse LDEO ASCII output: depth, u, v, uerr arrays.
+    Parse LDEO structured ASCII output (8 sections). Returns dict with
+    'header', 'velocity', 'shear', 'updown', 'ctd', 'range', 'diagnostics',
+    'bottom_track', 'warnings'. Backward-compatible: exposes depth/u/v/
+    uerr/speed at top level when [VELOCITY] is present. Old-format files
+    (no section markers) parse correctly as VELOCITY.
+
+extract_processing_warnings(result) → list[str]
+    Extract warnings from result dict. Derives HIGH_ERROR (mean>0.10 m/s)
+    and HEADING_OFFSET (>10 deg) from diagnostics/header.
 ```
 
 ### `utils/cast_matcher.py`
@@ -454,6 +483,13 @@ write_odv_collection(casts, output_dir, cruise_id)
 
 write_cast_odv(cast, output_dir, cruise_id)
     Write single-station ODV spreadsheet (tab-separated).
+    15 columns: Pressure, Depth, Temperature, QF:Temperature, Salinity,
+    QF:Salinity, SigmaTheta, QF:SigmaTheta, SoundSpeed, U, QF:U, V,
+    QF:V, U_Error, PotTemp.
+
+compute_velocity_qf(result, threshold_good=0.05, threshold_warn=0.10) → dict
+    Assign quality flags to LADCP velocity based on inversion error
+    and physical plausibility (VELOCITY_QF_THRESHOLDS module constant).
 ```
 
 ODV format requirements:
