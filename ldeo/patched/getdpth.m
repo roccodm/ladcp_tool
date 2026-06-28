@@ -81,11 +81,24 @@ for n=1:2
    if d.soundc==0
     sc=ss./d.sv(1,:);
     d.wm=d.wm.*sc;
+    sc_col=sc(:); % Nx1 for broadcasting over 2D arrays (hbot/hsurf)
     if existf(d,'hsurf')
-     d.hsurf=d.hsurf.*sc;
+     if size(d.hsurf,1)==numel(sc_col)
+      d.hsurf=bsxfun(@times,d.hsurf,sc_col);
+     elseif size(d.hsurf,2)==numel(sc_col)
+      d.hsurf=bsxfun(@times,d.hsurf,sc_col');
+     else
+      d.hsurf=d.hsurf.*sc;
+     end
     end
     if existf(d,'hbot')
-     d.hbot=d.hbot.*sc;
+     if size(d.hbot,1)==numel(sc_col)
+      d.hbot=bsxfun(@times,d.hbot,sc_col);
+     elseif size(d.hbot,2)==numel(sc_col)
+      d.hbot=bsxfun(@times,d.hbot,sc_col');
+     else
+      d.hbot=d.hbot.*sc;
+     end
     end
    end
   end

@@ -181,6 +181,7 @@ clear f p d dr ds ps di de der att;
 clear set_cast_params;
 % Copy per-cast params to the standard name expected by process_cast
 copyfile('set_cast_params_{station}.m', 'set_cast_params.m');
+rehash;
 {avdz_override}process_cast('{station}', 1, 0);
 """
 
