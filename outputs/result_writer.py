@@ -29,26 +29,39 @@ def write_velocity_profile(ladcp_profile, cast_id, output_dir):
 def write_summary(all_results, output_dir, cruise_id="TUNSIC26"):
     """Write processing summary across all casts."""
     out = Path(output_dir) / f"{cruise_id}_LADCP_summary.txt"
-    
+
     with open(out, 'w') as f:
         f.write(f"# {cruise_id} LADCP Processing Summary\n")
         f.write(f"# Generated: {datetime.now().isoformat()}\n")
         f.write(f"#\n")
         f.write(f"# {'Cast':<10s} {'Depth(m)':>8s} {'U_min':>8s} {'U_max':>8s} "
-                f"{'V_min':>8s} {'V_max':>8s} {'Error':>8s} {'Levels':>7s} {'Status':>10s}\n")
-        
+                f"{'V_min':>8s} {'V_max':>8s} {'MeanErr':>8s} {'MaxErr':>8s} "
+                f"{'Levels':>7s} {'Status':>12s} {'Warnings':s}\n")
+
         for r in all_results:
             name = r.get('station', '?')
             depth_max = r.get('depth_max', 0)
-            u_min = r.get('u_min', np.nan)
-            u_max = r.get('u_max', np.nan)
-            v_min = r.get('v_min', np.nan)
-            v_max = r.get('v_max', np.nan)
-            err = r.get('error_mean', np.nan)
-            levels = r.get('n_levels', 0)
             status = r.get('status', 'unknown')
-            
+
+            if status == 'success':
+                u_min = r.get('u_min', np.nan)
+                u_max = r.get('u_max', np.nan)
+                v_min = r.get('v_min', np.nan)
+                v_max = r.get('v_max', np.nan)
+                err = r.get('error_mean', np.nan)
+                err_max = r.get('error_max', np.nan)
+                levels = r.get('n_levels', 0)
+                warnings = r.get('warnings', [])
+                warn_str = '; '.join(warnings) if warnings else ''
+            else:
+                u_min = u_max = v_min = v_max = np.nan
+                err = err_max = np.nan
+                levels = 0
+                err_type = r.get('error_type', '')
+                warn_str = f"{err_type} (see log)" if err_type else ''
+
             f.write(f"  {name:<10s} {depth_max:8.1f} {u_min:8.3f} {u_max:8.3f} "
-                    f"{v_min:8.3f} {v_max:8.3f} {err:8.4f} {levels:7d} {status:>10s}\n")
-    
+                    f"{v_min:8.3f} {v_max:8.3f} {err:8.4f} {err_max:8.4f} "
+                    f"{levels:7d} {status:>12s} {warn_str}\n")
+
     return out

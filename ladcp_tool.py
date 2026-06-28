@@ -27,7 +27,7 @@ from ladcp_tool.processors.ctd_processor import (
 )
 from ladcp_tool.processors.ldeo_runner import (
     create_set_cast_params, run_octave_processing, run_octave_with_retry,
-    read_ldeo_result, LDEO_PATCHED, LDEO_GEOMAG,
+    read_ldeo_result, extract_processing_warnings, LDEO_PATCHED, LDEO_GEOMAG,
 )
 from ladcp_tool.outputs.odv_writer import write_odv_collection
 from ladcp_tool.outputs.plotter import plot_velocity_profile, plot_ctd_profile, plot_combined
@@ -222,7 +222,9 @@ Examples:
                             result['v_min'] = np.nanmin(ldeo['v'])
                             result['v_max'] = np.nanmax(ldeo['v'])
                             result['error_mean'] = np.nanmean(ldeo['uerr'])
+                            result['error_max'] = np.nanmax(ldeo['uerr'])
                             result['n_levels'] = len(ldeo['depth'])
+                            result['warnings'] = extract_processing_warnings(ldeo)
 
                             write_velocity_profile(ldeo, station, res_dir)
                             avdz_note = ''
