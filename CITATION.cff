@@ -1,0 +1,59 @@
+cff-version: 1.2.0
+title: ladcp_tool
+message: >-
+  If you use this software in your research, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - name: TUNSIC26 LADCP Tool Contributors
+license: MIT
+version: 1.0.0
+date-released: 2026-06-28
+repository-code: https://github.com/tunsic26/ladcp_tool
+url: https://github.com/tunsic26/ladcp_tool
+abstract: >-
+  Open-source pipeline for processing lowered ADCP and CTD data
+  from oceanographic cruises. Produces velocity profiles,
+  CTD-derived variables, and ODV-compatible spreadsheets.
+keywords:
+  - oceanography
+  - ladcp
+  - ctd
+  - adcp
+  - lowered-adcp
+  - velocity-profiles
+  - gsw
+  - teos-10
+  - seawater
+  - physical-oceanography
+references:
+  - type: article
+    title: >-
+      Deep velocity profiling using lowered acoustic Doppler current
+      profilers: Bottom track and inverse solutions
+    authors:
+      - family-names: Visbeck
+        given-names: Martin
+    journal: Journal of Atmospheric and Oceanic Technology
+    year: 2002
+    volume: 19
+    pages: 794-807
+    doi: 10.1175/1520-0426(2002)019<0794:DVPULA>2.0.CO;2
+  - type: software
+    title: LDEO LADCP Processing Software, Version IX_15
+    authors:
+      - family-names: Thurnherr
+        given-names: Andreas M.
+    year: 2024
+    repository-code: https://github.com/athurnherr/LDEO_IX
+  - type: article
+    title: >-
+      Getting started with TEOS-10 and the Gibbs Seawater (GSW)
+      Oceanographic Toolbox
+    authors:
+      - family-names: McDougall
+        given-names: Trevor J.
+      - family-names: Barker
+        given-names: Paul M.
+    year: 2011
+    publisher: SCOR/IAPSO WG127

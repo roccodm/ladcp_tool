@@ -1,0 +1,47 @@
+[project]
+name = "ladcp_tool"
+version = "1.0.0"
+description = "Open-source LADCP & CTD processing pipeline for oceanographic cruises"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "matplotlib>=3.8",
+    "gsw>=3.6",
+    "cftime>=1.6",
+    "netCDF4>=1.6",
+    "openpyxl>=3.1",
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Oceanography",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.scripts]
+ctd_tool = "ladcp_tool.ctd_tool:main"
+ladcp_tool = "ladcp_tool.ladcp_tool:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ladcp_tool*"]
+
+[tool.setuptools.package-data]
+ladcp_tool = [
+    "ldeo/patched/*.m",
+    "ldeo/original/*.m",
+    "ldeo/geomag/*.mat",
+    "ldeo/geomag/*.txt",
+    "ldeo/geomag/*.xlsx",
+    "templates/*.m",
+    "templates/*.template",
+]

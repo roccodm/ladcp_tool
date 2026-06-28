@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Octave
+*.o
+*.oct
+*.mex
+octave-workspace
+octave-core
+
+# Data files (large binaries)
+*.000
+*.hex
+*.hdr
+*.bl
+*.cnv
+*.XMLCON
+*.xmlcon
+*.CAL
+*.ffs_db
+*.ffs_gui
+*.psa
+sync.ffs_db
+
+# Processing outputs
+*/results/
+*/plots/
+*/odv/
+*/ldeo_ascii/
+*/work/
+*/ctd_ascii/
+*_output/
+*_test/
+
+# Archives
+*.tar.gz
+*.zip
+*.mat
+*.xlsx
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+batch_output*.log
+
+# BUT keep these as source (bundled with package)
+!ldeo/**/*.m
+!ldeo/**/*.mat
+!ldeo/**/*.txt
+!ldeo/**/*.xlsx
+!templates/*.m
+!calc_shear3.m.hacked
