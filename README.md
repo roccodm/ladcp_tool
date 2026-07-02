@@ -35,7 +35,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Install LDEO IX processing code
-#    Download from https://github.com/athurnherr/LDEO_IX or use TUNSIC26 bundle
+#    Download from https://github.com/athurnherr/LDEO_IX or use the included bundle
 export LDEO_PATCHED=/path/to/LDEO_IX/patched
 export LDEO_GEOMAG=/path/to/LDEO_IX/geomag
 
@@ -133,7 +133,7 @@ Contributions are welcome. Please open an issue or pull request on GitHub.
 If you use this tool in a publication, please cite:
 
 ```
-TUNSIC26 LADCP Tool Contributors (2026).
+Rocco De Marcow (2026).
 ladcp_tool: Open-source LADCP & CTD processing pipeline.
 https://github.com/<your-org>/ladcp_tool
 
