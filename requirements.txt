@@ -8,3 +8,6 @@ openpyxl>=3.1
 seawater>=3.3
 plotly>=5.20
 rasterio>=1.3
+
+# Optional: PNG export for layer maps (requires Chrome/Chromium)
+kaleido>=0.2

@@ -108,3 +108,35 @@ ladcp_tool/
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+This distribution includes third-party software under separate terms.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and
+license details of bundled components (LDEO IX, IGRF-13) and runtime
+dependencies (GSW/TEOS-10, GEBCO).
+
+### Note on LDEO IX
+
+The LDEO LADCP Processing Software (Version IX_15) by M. Visbeck and
+A.M. Thurnherr is bundled in `ldeo/patched/` with minor compatibility
+patches. The upstream repository
+([athurnherr/LDEO_IX](https://github.com/athurnherr/LDEO_IX)) does not
+include an explicit license file; the software is distributed publicly by
+the authors for scientific use. All original copyright notices are
+retained. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
+
+## Contributing
+
+Contributions are welcome. Please open an issue or pull request on GitHub.
+
+## Citation
+
+If you use this tool in a publication, please cite:
+
+```
+TUNSIC26 LADCP Tool Contributors (2026).
+ladcp_tool: Open-source LADCP & CTD processing pipeline.
+https://github.com/<your-org>/ladcp_tool
+
+Visbeck, M. (2002). Deep velocity profiling using lowered ADCPs.
+J. Atmos. Oceanic Technol., 19, 794–807.
+```
