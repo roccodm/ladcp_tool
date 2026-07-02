@@ -133,7 +133,7 @@ Contributions are welcome. Please open an issue or pull request on GitHub.
 If you use this tool in a publication, please cite:
 
 ```
-Rocco De Marcow (2026).
+Rocco De Marco (2026).
 ladcp_tool: Open-source LADCP & CTD processing pipeline.
 https://github.com/<your-org>/ladcp_tool
 
