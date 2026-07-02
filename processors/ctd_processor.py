@@ -241,6 +241,12 @@ def isolate_downcast(ctd_data):
             p_prev = P_down[j]
 
     down_indices = np.where(down_mask)[0]
+    # Defensive guard: ensure mono_mask length matches down_indices length
+    # (prevents off-by-one "boolean index did not match" on edge-case data)
+    if len(mono_mask) != len(down_indices):
+        n = min(len(mono_mask), len(down_indices))
+        mono_mask = mono_mask[:n]
+        down_indices = down_indices[:n]
     final_indices = down_indices[mono_mask]
 
     result = {}
@@ -327,6 +333,12 @@ def compute_derived(ctd_data):
         return {'salinity': np.full_like(P, np.nan)}
     
     SP = gsw.SP_from_C(C[good], T[good], P[good])
+    
+    def _expand(arr):
+        out = np.full(len(good), np.nan)
+        out[good] = arr
+        return out
+    
     SA = gsw.SA_from_SP(SP, P[good], lon, lat)
     pot_temp = gsw.pt0_from_t(SA, T[good], P[good])
     CT_val = gsw.CT_from_t(SA, T[good], P[good])
@@ -336,14 +348,14 @@ def compute_derived(ctd_data):
     depth = -gsw.z_from_p(P[good], lat)
     
     return {
-        'salinity': SP,
-        'abs_salinity': SA,
-        'pot_temp': pot_temp,
-        'cons_temp': CT_val,
-        'sigma0': sig0,
-        'density': rho,
-        'sound_speed': ss,
-        'depth': depth,
+        'salinity': _expand(SP),
+        'abs_salinity': _expand(SA),
+        'pot_temp': _expand(pot_temp),
+        'cons_temp': _expand(CT_val),
+        'sigma0': _expand(sig0),
+        'density': _expand(rho),
+        'sound_speed': _expand(ss),
+        'depth': _expand(depth),
         'good_mask': good,
     }
 
@@ -536,7 +548,7 @@ def save_ldeo_format(ctd_data, derived, prefix, output_dir, pressure_noise=0.0):
         ctd_data['elapsed'][good],
         press,
         ctd_data['temperature'][good],
-        derived['salinity'],
+        derived['salinity'][good],
     ])
     np.savetxt(out / f"{prefix}_ctd_timeseries.txt", ts, fmt='%.4f')
     

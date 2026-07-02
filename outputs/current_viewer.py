@@ -43,11 +43,12 @@ STATION_LABEL_SIZE = 10
 # ---------- 1. Lettura dati ----------
 
 def load_station_metadata(odv_dir, cruise_id='TUNSIC26'):
-    """Legge lat, lon, bottom_depth e datetime dagli header ODV.
+    """Legge lat, lon, bottom_depth e datetime dal file ODV.
 
-    Scansiona tutti i file *_LADCP.txt nella directory ODV e ne
-    estrae i metadati dalla riga di dati (prima riga dopo gli header
-    // e le dichiarazioni di variabile).
+    Supporta due formati:
+      - Nuovo: singolo file flat {cruise_id}_LADCP_ODV.txt con metadati
+        ripetuti su ogni riga (formato ODV generic spreadsheet).
+      - Legacy: file individuali {cruise_id}_*_LADCP.txt .
 
     Args:
         odv_dir: path alla directory odv/ prodotta da ladcp_tool
@@ -59,6 +60,37 @@ def load_station_metadata(odv_dir, cruise_id='TUNSIC26'):
     stations = {}
     odv_path = Path(odv_dir)
 
+    # --- Nuovo formato: singolo file flat ---
+    flat_file = odv_path / f'{cruise_id}_LADCP_ODV.txt'
+    if flat_file.exists():
+        with open(flat_file) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith('//'):
+                    continue
+                if line.startswith('Cruise'):
+                    continue
+                parts = line.split('\t')
+                if len(parts) >= 8:
+                    stn = parts[1]
+                    if stn in stations:
+                        continue
+                    try:
+                        date_str = parts[3]  # mon/day/yr
+                        time_str = parts[4]  # hh:mm
+                        dt = datetime.strptime(
+                            f'{date_str} {time_str}', '%m/%d/%Y %H:%M')
+                        stations[stn] = {
+                            'lon': float(parts[5]),
+                            'lat': float(parts[6]),
+                            'bottom_depth': float(parts[7]),
+                            'datetime': dt,
+                        }
+                    except (ValueError, IndexError):
+                        pass
+        return stations
+
+    # --- Legacy: file individuali ---
     for f in sorted(odv_path.glob(f'{cruise_id}_*_LADCP.txt')):
         station_id = f.stem.replace(f'{cruise_id}_', '').replace('_LADCP', '')
 
@@ -821,7 +853,8 @@ def build_layer_map(slices, target_depth, bathy=None,
     extent = max(max(lons) - min(lons), max(lats) - min(lats))
     if extent <= 0:
         extent = 1.0
-    arrow_scale = 0.15 * extent  # frecce ~15% dell'estensione per 1 m/s
+    # Frecce piu' lunghe (~30% dell'estensione per 1 m/s) e piu' marcate
+    arrow_scale = 0.30 * extent
 
     # Per frecce piu' leggere (punti griglia), riduci opacita'
     is_grid = [p['station'] == 'grid' for p in arrow_points]
@@ -839,10 +872,10 @@ def build_layer_map(slices, target_depth, bathy=None,
         g = int(120 + norm_speed * (73 - 120))
         b = int(214 + norm_speed * (72 - 214))
         color = f'rgb({r},{g},{b})'
-        alpha = 0.5 if is_grid[i] else 1.0
-        line_w = 1.5 if is_grid[i] else 3.0
+        alpha = 0.65 if is_grid[i] else 1.0
+        line_w = 2.5 if is_grid[i] else 4.5
 
-        # Fusto della freccia
+        # Fusto della freccia (linea)
         fig.add_trace(go.Scatter(
             x=[lon0, lon1],
             y=[lat0, lat1],
@@ -854,18 +887,25 @@ def build_layer_map(slices, target_depth, bathy=None,
             showlegend=False,
         ))
 
-        # Punta (marker triangolo)
-        fig.add_trace(go.Scatter(
-            x=[lon1],
-            y=[lat1],
-            mode='markers',
-            marker=dict(size=8 if is_grid[i] else 12,
-                        symbol='triangle-up',
-                        color=color),
+        # Punta della freccia via annotation (ruotata automaticamente
+        # da Plotly nella direzione del vettore). arrowhead=3 = punta
+        # triangolare classica. arrowsize e arrowwidth controllano
+        # rispettivamente la lunghezza e lo spessore della punta.
+        arrowsize = 1.8 if is_grid[i] else 2.8
+        arrowwidth = line_w
+        fig.add_annotation(
+            x=lon1, y=lat1,
+            ax=lon0, ay=lat0,
+            xref='x', yref='y', axref='x', ayref='y',
+            showarrow=True,
+            arrowhead=3,
+            arrowsize=arrowsize,
+            arrowwidth=arrowwidth,
+            arrowcolor=color,
             opacity=alpha,
-            hoverinfo='skip',
-            showlegend=False,
-        ))
+            standoff=0,
+            startstandoff=0,
+        )
 
     # --- Etichette stazioni reali (non grid) ---
     real_stations = [p for p in layer if p['station'] != 'grid']
